@@ -84,6 +84,7 @@ def get_args_parser(
         type=int,
         help="Number of tries",
     )
+    parser.add_argument("--local-rank", default=0, type=int, help="Variable for distributed computing.") 
     parser.set_defaults(
         train_dataset_str="ImageNet:split=TRAIN",
         val_dataset_str="ImageNet:split=VAL",
