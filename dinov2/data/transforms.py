@@ -38,9 +38,16 @@ class MaybeToTensor(transforms.ToTensor):
         return super().__call__(pic)
 
 
-# Use timm's names
-IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+# Original Image-net mean and std
+# IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+# IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+
+# Depth Image-net mean and std
+IMAGENET_DEFAULT_MEAN = (0.6698, 0.6393, 0.5696)
+IMAGENET_DEFAULT_STD = (0.2761, 0.2345, 0.1412)
+
+# Mean: [0.66987614 0.63936075 0.56959592]
+# Std: [0.27616089 0.23456403 0.14121952]
 
 
 def make_normalize_transform(

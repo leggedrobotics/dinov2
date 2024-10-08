@@ -25,11 +25,4 @@ python scripts/imagenet_dataset_metadata.py
 
 echo "Cuda visible devices ${CUDA_VISIBLE_DEVICES}"
 
-python -m torch.distributed.launch --nproc_per_node=4 dinov2/train/train.py --config-file dinov2/configs/train/vitl16_short.yaml --output-dir /cluster/work/rsl/patelm/result/ train.dataset_path=ImageNet:split=TRAIN:root=${TMPDIR}/imagenet-1k:extra=${TMPDIR}/imagenet-1k
-
-python -m torch.distributed.launch --nproc_per_node=1 dinov2/eval/knn.py \
-    --config-file /cluster/work/rsl/patelm/result/config.yaml \
-    --pretrained-weights /cluster/work/rsl/patelm/result/eval/training_99999/teacher_checkpoint.pth \
-    --output-dir /cluster/work/rsl/patelm/result/eval/training_99999/knn_10 \
-    --train-dataset ImageNet:split=TRAIN:root=${TMPDIR}/imagenet-1k:extra=${TMPDIR}/imagenet-1k \
-    --val-dataset ImageNet:split=VAL:root=${TMPDIR}/imagenet-1k:extra=${TMPDIR}/imagenet-1k
+python -m torch.distributed.launch --nproc_per_node=4 dinov2/train/train.py --config-file dinov2/configs/train/vitl16_short.yaml --output-dir /cluster/work/rsl/patelm/result/%x_%j train.dataset_path=ImageNet:split=TRAIN:root=${TMPDIR}/imagenet-1k:extra=${TMPDIR}/imagenet-1k
