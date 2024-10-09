@@ -2,5 +2,6 @@
 train:
   dataset_path: ImageNet:split=TRAIN
   batch_size_per_gpu: 64
+  num_workers: 4
 student:
   block_chunks: 4
