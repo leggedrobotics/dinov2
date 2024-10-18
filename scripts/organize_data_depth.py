@@ -34,7 +34,6 @@ shutil.copy(label_path, root_tgt_dir)
 with tarfile.open(test_tar_file, "r:gz") as tar:
     tar.extractall(path=test_dir) 
 
-# TODO: Move one level up the test images ?
 for root, dirs, files in os.walk(test_dir):
     for file in files:
         # Get the full file path
@@ -42,6 +41,13 @@ for root, dirs, files in os.walk(test_dir):
         new_filename = file.split('.')[0] + ".JPEG"
         # Move the file to the root of the `train_dir`
         shutil.move(file_path, os.path.join(test_dir, new_filename))
+
+# Remove now-empty directories
+for root, dirs, files in os.walk(test_dir):
+    for dir in dirs:
+        dir_path = os.path.join(root, dir)
+        if not os.listdir(dir_path):  # Check if the directory is empty
+            os.rmdir(dir_path)
 
 print(f"Test Dataset organized successfully under {test_dir}")
 
@@ -70,6 +76,8 @@ for root, dirs, files in os.walk(train_dir):
         dir_path = os.path.join(root, dir)
         if not os.listdir(dir_path):  # Check if the directory is empty
             os.rmdir(dir_path)
+
+print(f"Test Dataset organized successfully under {test_dir}")
 
 # Organize validation data by class
 with tarfile.open(val_tar_file, "r:gz") as tar:
