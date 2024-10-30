@@ -14,6 +14,7 @@ import numpy as np
 from .extended import ExtendedVisionDataset
 from .decoders import TargetDecoder, ImageDataDecoder
 from torchvision.datasets.folder import DatasetFolder, default_loader
+from PIL import Image
 
 logger = logging.getLogger("dinov2")
 _Target = int
@@ -206,11 +207,13 @@ class ImageNetDepth(ExtendedVisionDataset):
         image_full_path = os.path.join(self.root, image_relpath)
 
         depth_array = np.load(image_full_path)['depth']
-        depth_img = np.stack([depth_array]*3, axis=0, dtype=np.float32)
 
+        depth_normalized = ((depth_array - np.min(depth_array)) / (np.max(depth_array) - np.min(depth_array)) * 255).astype(np.uint8)
+        depth_img = np.stack([depth_normalized]*3, axis=-1)
+        return Image.fromarray(depth_img)
 
-        depth_tensor = torch.tensor(depth_img, dtype=torch.float32)
-        return depth_tensor
+        # depth_tensor = torch.tensor(depth_img, dtype=torch.float32)
+        # return depth_tensor
 
     def get_target(self, index: int) -> Optional[Target]:
         entries = self._get_entries()

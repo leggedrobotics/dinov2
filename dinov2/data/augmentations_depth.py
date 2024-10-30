@@ -106,21 +106,21 @@ class DataAugmentationDINODepth(object):
 
         local_transfo_extra = GaussianBlur(p=0.5)
 
-        # # normalization
-        # self.normalize = transforms.Compose(
-        #     [
-        #         transforms.ToTensor(),
-        #         make_normalize_transform(),
-        #     ]
-        # )
-
         # normalization
         self.normalize = transforms.Compose(
             [
-                MinMaxNormalize(),
+                transforms.ToTensor(),
                 make_normalize_transform(),
             ]
         )
+
+        # # normalization
+        # self.normalize = transforms.Compose(
+        #     [
+        #         MinMaxNormalize(),
+        #         make_normalize_transform(),
+        #     ]
+        # )
 
         # self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])
         # self.global_transfo2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
