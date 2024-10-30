@@ -6,6 +6,7 @@
 import logging
 
 from torchvision import transforms
+import torch
 
 from .transforms import (
     GaussianBlur,
@@ -15,6 +16,30 @@ from .transforms import (
 
 logger = logging.getLogger("dinov2")
 
+class MinMaxNormalize:
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        min_val = tensor.min()
+        max_val = tensor.max()
+        return (tensor - min_val) / (max_val - min_val + 1e-8)  # Adding a small epsilon for numerical stability
+
+class LogNormalize:
+    def __init__(self, min_depth=0.1, max_depth=100):
+        self.log_min = torch.log(torch.tensor(min_depth))
+        self.log_max = torch.log(torch.tensor(max_depth))
+        
+    def __call__(self, tensor: torch.Tensor, min_depth=0.1, max_depth=100) -> torch.Tensor:
+        tensor = torch.clamp(tensor, min_depth, max_depth)
+        log_depth = torch.log(tensor)
+        return (log_depth - self.log_min) / (self.log_max - self.log_min + 1e-8) # Adding a small epsilon for numerical stability
+
+class MaxNormalize:
+    def __init__(self, min_depth=0.1, max_depth=100):
+        self.min = torch.tensor(min_depth)
+        self.max = torch.tensor(max_depth)
+        
+    def __call__(self, tensor: torch.Tensor, min_depth=0.1, max_depth=100) -> torch.Tensor:
+        tensor = torch.clamp(tensor, min_depth, max_depth)
+        return (tensor - self.min) / (self.max - self.min + 1e-8) # Adding a small epsilon for numerical stability
 
 class DataAugmentationDINODepth(object):
     def __init__(
@@ -81,10 +106,18 @@ class DataAugmentationDINODepth(object):
 
         local_transfo_extra = GaussianBlur(p=0.5)
 
+        # # normalization
+        # self.normalize = transforms.Compose(
+        #     [
+        #         transforms.ToTensor(),
+        #         make_normalize_transform(),
+        #     ]
+        # )
+
         # normalization
         self.normalize = transforms.Compose(
             [
-                transforms.ToTensor(),
+                MinMaxNormalize(),
                 make_normalize_transform(),
             ]
         )
