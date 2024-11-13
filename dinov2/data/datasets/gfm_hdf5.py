@@ -14,38 +14,47 @@ from .decoders import TargetDecoder, ImageDataDecoder
 from torchvision.datasets.folder import DatasetFolder, default_loader
 from PIL import Image
 import h5py
+import json
 
 logger = logging.getLogger("dinov2")
 
 class GFMDataset(ExtendedVisionDataset):
-
     def __init__(
         self,
         *,
         root: str,
+        metadata_file: str = "dataset_info.json",
         transforms: Optional[Callable] = None,
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
     ) -> None:
         super().__init__(root, transforms, transform, target_transform)
         self.root = root
-
         self.h5_files = []
         self.image_indices = []
+
+        # Load the metadata from JSON
+        metadata_file_path = os.path.join(root, metadata_file)
+        with open(metadata_file_path, 'r') as f:
+            dataset_info = json.load(f)
         
-        for filename in sorted(os.listdir(root)):
-            if filename.endswith('.h5') or filename.endswith('.hdf5'):
-                print(f"Loading HDF5 file: {filename}")
-                h5_path = os.path.join(root, filename)
-                h5_file = h5py.File(h5_path, 'r')
-                self.h5_files.append(h5_file)
-                
-                # Gather all class names and image indices within the current file
-                for class_name in h5_file.keys():
-                    print(f"Loading class: {class_name}")
-                    class_group = h5_file[class_name]
-                    self.image_indices.extend([(len(self.h5_files) - 1, class_name, image_key) 
-                                               for image_key in class_group.keys() if image_key.startswith('image_')])
+        # Open HDF5 files and build a list of image indices
+        for file_index, entry in enumerate(dataset_info):
+            filename = entry['filename']
+            h5_path = os.path.join(root, filename)
+            if not os.path.exists(h5_path):
+                raise FileNotFoundError(f"HDF5 file {filename} not found in {root}")
+
+            # Open HDF5 file and keep it open for later access
+            h5_file = h5py.File(h5_path, 'r')
+            self.h5_files.append(h5_file)
+
+            # Add image keys for each class in the file
+            class_name = entry['class_name']
+            image_keys = entry['image_keys']
+            self.image_indices.extend([(file_index, class_name, image_key) for image_key in image_keys])
+
+        print(f"Loaded dataset metadata from {metadata_file}")
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         try:
