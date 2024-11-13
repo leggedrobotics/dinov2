@@ -42,6 +42,7 @@ class GFMDataset(ExtendedVisionDataset):
                 
                 # Gather all class names and image indices within the current file
                 for class_name in h5_file.keys():
+                    print(f"Loading class: {class_name}")
                     class_group = h5_file[class_name]
                     self.image_indices.extend([(len(self.h5_files) - 1, class_name, image_key) 
                                                for image_key in class_group.keys() if image_key.startswith('image_')])
