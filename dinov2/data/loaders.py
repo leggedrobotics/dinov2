@@ -10,7 +10,7 @@ from typing import Any, Callable, List, Optional, TypeVar
 import torch
 from torch.utils.data import Sampler
 
-from .datasets import ImageNet, ImageNet22k, ImageNetDepth
+from .datasets import ImageNet, ImageNet22k, ImageNetDepth, GFMDataset
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 
@@ -62,6 +62,8 @@ def _parse_dataset_str(dataset_str: str):
             kwargs["split"] = ImageNetDepth.Split[kwargs["split"]]
     elif name == "ImageNet22k":
         class_ = ImageNet22k
+    elif name == "GFMDataset":
+        class_ = GFMDataset
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 
