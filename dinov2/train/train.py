@@ -21,7 +21,7 @@ from dinov2.utils.config import setup
 from dinov2.utils.utils import CosineScheduler
 
 from dinov2.train.ssl_meta_arch import SSLMetaArch
-
+import wandb
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
@@ -54,7 +54,8 @@ For python-based LazyConfig, use "path.key=value".
         type=str,
         help="Output directory to save logs and checkpoints",
     )
-    parser.add_argument("--local-rank", default=0, type=int, help="Variable for distributed computing.") 
+    parser.add_argument("--local-rank", default=0, type=int, help="Variable for distributed computing.")
+    parser.add_argument("--exp-name", default="dinov2", type=str, help="Experiment name")
 
     return parser
 
@@ -137,6 +138,8 @@ def do_train(cfg, model, resume=False):
     inputs_dtype = torch.half
     fp16_scaler = model.fp16_scaler  # for mixed precision training
 
+
+    wandb.init(project="dinov2-prtrain", entity="geometric-foundational-model", name=cfg.exp_name, config=cfg, dir=cfg.train.output_dir)
     # setup optimizer
 
     optimizer = build_optimizer(cfg, model.get_params_groups())
@@ -291,6 +294,16 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(current_batch_size=current_batch_size)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
 
+        wandb.log({
+            "lr": lr,
+            "weight_decay": wd,
+            "momentum": mom,
+            "last_layer_lr": last_layer_lr,
+            "batch_size": current_batch_size,
+            "total_loss": losses_reduced,
+            **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
+        }, step=iteration)
+        
         # checkpointing and testing
 
         if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
@@ -299,7 +312,9 @@ def do_train(cfg, model, resume=False):
         periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
+
     metric_logger.synchronize_between_processes()
+    wandb.log({k: v.global_avg for k, v in metric_logger.meters.items()})
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
