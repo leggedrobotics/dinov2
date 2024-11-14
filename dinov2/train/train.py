@@ -121,6 +121,15 @@ def apply_optim_scheduler(optimizer, lr, wd, last_layer_lr):
         param_group["weight_decay"] = wd * wd_multiplier
         param_group["lr"] = (last_layer_lr if is_last_layer else lr) * lr_multiplier
 
+def initialize_wandb(cfg):
+    print(f"Initializing wandb with experiment name: {cfg.train.exp_name}")
+    wandb.init(
+        project="dinov2-pretrain",
+        entity="geometric-foundational-model",
+        name=cfg.train.exp_name,
+        config=OmegaConf.to_container(cfg, resolve=True),
+        dir=cfg.train.output_dir,
+    )
 
 def do_test(cfg, model, iteration):
     new_state_dict = model.teacher.state_dict()
@@ -139,14 +148,8 @@ def do_train(cfg, model, resume=False):
     inputs_dtype = torch.half
     fp16_scaler = model.fp16_scaler  # for mixed precision training
 
-
-    wandb.init(
-    project="dinov2-pretrain",
-    entity="geometric-foundational-model",
-    name=cfg.train.exp_name,
-    config=OmegaConf.to_container(cfg, resolve=True),  # Convert to a dictionary
-    dir=cfg.train.output_dir,
-    )
+    if distributed.is_main_process():
+        initialize_wandb(cfg)
     # setup optimizer
 
     optimizer = build_optimizer(cfg, model.get_params_groups())
@@ -301,15 +304,16 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(current_batch_size=current_batch_size)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
 
-        wandb.log({
-            "lr": lr,
-            "weight_decay": wd,
-            "momentum": mom,
-            "last_layer_lr": last_layer_lr,
-            "batch_size": current_batch_size,
-            "total_loss": losses_reduced,
-            **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
-        }, step=iteration)
+        if distributed.is_main_process():
+            wandb.log({
+                "lr": lr,
+                "weight_decay": wd,
+                "momentum": mom,
+                "last_layer_lr": last_layer_lr,
+                "batch_size": current_batch_size,
+                "total_loss": losses_reduced,
+                **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
+            }, step=iteration)
 
         # checkpointing and testing
 
@@ -321,7 +325,13 @@ def do_train(cfg, model, resume=False):
         iteration = iteration + 1
 
     metric_logger.synchronize_between_processes()
-    wandb.log({k: v.global_avg for k, v in metric_logger.meters.items()})
+
+    if distributed.is_main_process():
+        wandb.log({k: v.global_avg for k, v in metric_logger.meters.items()})
+        logger.info(f"Averaged stats: {metric_logger}")
+        logger.info("Finished training.")
+        wandb.finish()
+    
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
