@@ -22,6 +22,7 @@ from dinov2.utils.utils import CosineScheduler
 
 from dinov2.train.ssl_meta_arch import SSLMetaArch
 import wandb
+from omegaconf import OmegaConf
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
@@ -139,7 +140,13 @@ def do_train(cfg, model, resume=False):
     fp16_scaler = model.fp16_scaler  # for mixed precision training
 
 
-    wandb.init(project="dinov2-prtrain", entity="geometric-foundational-model", name=cfg.exp_name, config=cfg, dir=cfg.train.output_dir)
+    wandb.init(
+    project="dinov2-pretrain",
+    entity="geometric-foundational-model",
+    name=cfg.train.exp_name,
+    config=OmegaConf.to_container(cfg, resolve=True),  # Convert to a dictionary
+    dir=cfg.train.output_dir,
+    )
     # setup optimizer
 
     optimizer = build_optimizer(cfg, model.get_params_groups())
@@ -303,7 +310,7 @@ def do_train(cfg, model, resume=False):
             "total_loss": losses_reduced,
             **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
         }, step=iteration)
-        
+
         # checkpointing and testing
 
         if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
