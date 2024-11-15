@@ -187,10 +187,14 @@ class _TorchDistributedEnvironment:
 	# Assuming for now that there is always 1 node
         self.master_addr = nodes[0]
         self.master_port = _get_master_port(seed=job_id)
-        self.rank = int(os.environ["LOCAL_RANK"])
-        self.world_size = torch.cuda.device_count() #int(os.environ["SLURM_NTASKS"])
+        self.rank = int(os.environ["SLURM_PROCID"])
+        self.world_size = int(os.environ["SLURM_NTASKS"])
         assert self.rank < self.world_size
-        self.local_rank = int(os.environ["LOCAL_RANK"])
+        self.local_rank = int(os.environ["SLURM_LOCALID"])
+        # self.rank = int(os.environ["LOCAL_RANK"])
+        # self.world_size = torch.cuda.device_count() #int(os.environ["SLURM_NTASKS"])
+        # assert self.rank < self.world_size
+        # self.local_rank = int(os.environ["LOCAL_RANK"])
         self.local_world_size = self.world_size // node_count
         assert self.local_rank < self.local_world_size
 
