@@ -25,7 +25,7 @@ from dinov2.eval.setup import get_args_parser as get_setup_args_parser
 from dinov2.eval.setup import setup_and_build_model
 from dinov2.eval.utils import ModelWithIntermediateLayers, evaluate
 from dinov2.logging import MetricLogger
-
+import wandb
 
 logger = logging.getLogger("dinov2")
 
@@ -133,6 +133,7 @@ def get_args_parser(
         help="Path to a file containing a mapping to adjust classifier outputs",
     )
     parser.add_argument("--local-rank", default=0, type=int, help="Variable for distributed computing.") 
+    parser.add_argument("--exp-name", default="dinov2_eval_linear", type=str, help="Experiment name")
     parser.set_defaults(
         train_dataset_str="ImageNet:split=TRAIN",
         val_dataset_str="ImageNet:split=VAL",
@@ -302,6 +303,12 @@ def evaluate_linear_classifiers(
     logger.info(f"best classifier: {results_dict['best_classifier']}")
 
     if distributed.is_main_process():
+        wandb.log({
+        f"{prefixstring} best_classifier": results_dict["best_classifier"]["name"],
+        f"{prefixstring} best_accuracy": results_dict["best_classifier"]["accuracy"],
+    })
+
+    if distributed.is_main_process():
         with open(metrics_file_path, "a") as f:
             f.write(f"iter: {iteration}\n")
             for k, v in results_dict.items():
@@ -370,6 +377,12 @@ def eval_linear(
             metric_logger.update(loss=loss.item())
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
             print("lr", optimizer.param_groups[0]["lr"])
+            if distributed.is_main_process():
+                wandb.log({
+                "iteration": iteration,
+                "loss": loss.item(),
+                "learning_rate": optimizer.param_groups[0]["lr"],
+            })
 
         if iteration - start_iter > 5:
             if iteration % running_checkpoint_period == 0:
@@ -458,6 +471,11 @@ def test_on_datasets(
             best_classifier_on_val=best_classifier_on_val,
         )
         results_dict[f"{test_dataset_str}_accuracy"] = 100.0 * dataset_results_dict["best_classifier"]["accuracy"]
+    
+    if distributed.is_main_process():
+        for dataset_name, accuracy in results_dict.items():
+            wandb.log({f"test/{dataset_name}": accuracy})
+
     return results_dict
 
 
@@ -590,11 +608,25 @@ def run_eval_linear(
     results_dict[f"{val_dataset_str}_accuracy"] = 100.0 * val_results_dict["best_classifier"]["accuracy"]
     logger.info("Test Results Dict " + str(results_dict))
 
+    if distributed.is_main_process():
+        wandb.finish()
+        
     return results_dict
 
+def initialize_wandb(args):
+    """Initialize WandB for linear evaluation."""
+    wandb.init(
+        project="dinov2-eval",
+        entity="geometric-foundational-model",
+        name=args.exp_name,
+        config=vars(args),
+        dir=args.output_dir,
+    )
 
 def main(args):
     model, autocast_dtype = setup_and_build_model(args)
+    if distributed.is_main_process():
+        initialize_wandb(args)
     run_eval_linear(
         model=model,
         output_dir=args.output_dir,

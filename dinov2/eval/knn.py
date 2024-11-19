@@ -387,13 +387,14 @@ def eval_knn_with_model(
 def main(args):
     model, autocast_dtype = setup_and_build_model(args)
 
-    wandb.init(
-            project="dinov2-eval",
-            entity="geometric-foundational-model",
-            name=args.exp_name,
-            config=vars(args),
-            dir=args.output_dir,
-        )
+    if distributed.is_main_process():
+        wandb.init(
+                project="dinov2-eval",
+                entity="geometric-foundational-model",
+                name=args.exp_name,
+                config=vars(args),
+                dir=args.output_dir,
+            )
     
     eval_knn_with_model(
         model=model,
@@ -412,7 +413,9 @@ def main(args):
         n_tries=args.n_tries,
     )
 
-    wandb.finish()
+    if distributed.is_main_process():
+        wandb.finish()
+        
     return 0
 
 
