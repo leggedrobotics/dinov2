@@ -21,7 +21,7 @@ from dinov2.eval.metrics import AccuracyAveraging, build_topk_accuracy_metric
 from dinov2.eval.setup import get_args_parser as get_setup_args_parser
 from dinov2.eval.setup import setup_and_build_model
 from dinov2.eval.utils import ModelWithNormalize, evaluate, extract_features
-
+import wandb
 
 logger = logging.getLogger("dinov2")
 
@@ -85,6 +85,7 @@ def get_args_parser(
         help="Number of tries",
     )
     parser.add_argument("--local-rank", default=0, type=int, help="Variable for distributed computing.") 
+    parser.add_argument("--exp-name", default="dinov2_eval_knn", type=str, help="Experiment name")
     parser.set_defaults(
         train_dataset_str="ImageNet:split=TRAIN",
         val_dataset_str="ImageNet:split=VAL",
@@ -367,6 +368,12 @@ def eval_knn_with_model(
             results_dict[f"{knn_} Top 5"] = top5
             logger.info(f"{knn_} classifier result: Top1: {top1:.2f} Top5: {top5:.2f}")
 
+            # Log results to WandB
+            wandb.log({
+                f"{knn_} Top 1": top1,
+                f"{knn_} Top 5": top5,
+            })
+
     metrics_file_path = os.path.join(output_dir, "results_eval_knn.json")
     with open(metrics_file_path, "a") as f:
         for k, v in results_dict.items():
@@ -379,6 +386,15 @@ def eval_knn_with_model(
 
 def main(args):
     model, autocast_dtype = setup_and_build_model(args)
+
+    wandb.init(
+            project="dinov2-eval",
+            entity="geometric-foundational-model",
+            name=args.exp_name,
+            config=vars(args),
+            dir=args.output_dir,
+        )
+    
     eval_knn_with_model(
         model=model,
         output_dir=args.output_dir,
@@ -395,6 +411,8 @@ def main(args):
         n_per_class_list=args.n_per_class_list,
         n_tries=args.n_tries,
     )
+
+    wandb.finish()
     return 0
 
 
