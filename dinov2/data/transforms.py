@@ -46,10 +46,13 @@ class MaybeToTensor(transforms.ToTensor):
 # IMAGENET_DEFAULT_MEAN = (0.6698, 0.6393, 0.5696)
 # IMAGENET_DEFAULT_STD = (0.2761, 0.2345, 0.1412)
 
-# Depth Image-net mean and std (for min-max normalization)
+# Depth Image-net mean and std (for min-max normalization) Standard Value
 IMAGENET_DEFAULT_MEAN = (0.5, 0.5, 0.5)
 IMAGENET_DEFAULT_STD = (0.2, 0.2, 0.2)
 
+# Depth Image-net mean and std (for min-max normalization) Computed Value
+# IMAGENET_DEFAULT_MEAN = (0.393, 0.393, 0.393)
+# IMAGENET_DEFAULT_STD = (0.295, 0.295, 0.295) 
 
 def make_normalize_transform(
     mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,

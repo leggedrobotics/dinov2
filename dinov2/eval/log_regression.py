@@ -94,6 +94,7 @@ def get_args_parser(
         help="Maximum number of train iterations (default: %(default)s)",
     )
     parser.add_argument("--local-rank", default=0, type=int, help="Variable for distributed computing.") 
+    parser.add_argument("--exp-name", default="dinov2_eval_logreg", type=str, help="Experiment name")
     parser.set_defaults(
         train_dataset_str="ImageNet:split=TRAIN",
         val_dataset_str="ImageNet:split=VAL",
