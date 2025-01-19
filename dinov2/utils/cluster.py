@@ -79,9 +79,12 @@ def get_slurm_executor_parameters(
         "mem_gb": 0,  # Requests all memory on a node, see https://slurm.schedmd.com/sbatch.html
         "gpus_per_node": num_gpus_per_node,
         "tasks_per_node": num_gpus_per_node,  # one task per GPU
-        "cpus_per_task": 10,
+        "cpus_per_task": 8,
         "nodes": nodes,
-        "slurm_partition": get_slurm_partition(cluster_type),
+        "slurm_partition": "learn",
+        "qos": "lowest",
+        "slurm_account": "fair_amaia_cw_video",
+        "slurm_signal_delay_s": 120
     }
     # apply cluster-specific adjustments
     cluster_type = get_cluster_type(cluster_type)

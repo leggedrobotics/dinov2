@@ -8,7 +8,6 @@ import logging
 import os
 from pathlib import Path
 from typing import List, Optional
-
 import submitit
 
 from dinov2.utils.cluster import (
@@ -108,10 +107,15 @@ def submit_jobs(task_class, args, name: str):
         nodes=args.nodes,
         num_gpus_per_node=args.ngpus,
         timeout_min=args.timeout,  # max is 60 * 72
+        slurm_partition="learn",
         slurm_signal_delay_s=120,
-        slurm_partition=args.partition,
+        qos="lowest",
+        cpus_per_task=12,
+        slurm_account='fair_amaia_cw_video',
         **kwargs,
     )
+    # print(executor_params)
+    # print(os.environ)
     executor.update_parameters(name=name, **executor_params)
 
     task = task_class(args)

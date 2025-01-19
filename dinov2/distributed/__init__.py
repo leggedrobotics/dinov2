@@ -182,10 +182,15 @@ class _TorchDistributedEnvironment:
         # logger.info("Initialization from Slurm environment")
         job_id = int(os.environ["SLURM_JOB_ID"])
         node_count = int(os.environ["SLURM_JOB_NUM_NODES"])
-        nodes = _parse_slurm_node_list(os.environ["SLURM_JOB_NODELIST"])
+        _nodes = _parse_slurm_node_list(os.environ["SLURM_JOB_NODELIST"])
+        nodes = []
+        for node in _nodes:
+            nodes.extend(node.split(','))
+        nodes = list(set(nodes))
+        # print(nodes)
         assert len(nodes) == node_count
 	# Assuming for now that there is always 1 node
-        self.master_addr = nodes[0]
+        self.master_addr = os.environ['HOSTNAME']
         self.master_port = _get_master_port(seed=job_id)
         self.rank = int(os.environ["SLURM_PROCID"])
         self.world_size = int(os.environ["SLURM_NTASKS"])
