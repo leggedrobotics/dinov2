@@ -260,7 +260,11 @@ def do_train(cfg, model, resume=False):
         header,
         max_iter,
         start_iter,
-    ):
+    ):  
+        # ⏳ **1️⃣ Measure Data Loading Time (CPU)**
+        torch.cuda.synchronize()  # Ensure previous GPU operations finish
+        data_loading_time = time.time() - prev_end_time  # Time since last batch processing ended
+
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
@@ -272,10 +276,6 @@ def do_train(cfg, model, resume=False):
         teacher_temp = teacher_temp_schedule[iteration]
         last_layer_lr = last_layer_lr_schedule[iteration]
         apply_optim_scheduler(optimizer, lr, wd, last_layer_lr)
-
-        # ⏳ **1️⃣ Measure Data Loading Time (CPU)**
-        torch.cuda.synchronize()  # Ensure previous GPU operations finish
-        data_loading_time = time.time() - prev_end_time  # Time since last batch processing ended
 
         iteration_start = time.time()  # Start of iteration
 
@@ -346,10 +346,10 @@ def do_train(cfg, model, resume=False):
                 "last_layer_lr": last_layer_lr,
                 "batch_size": current_batch_size,
                 "total_loss": losses_reduced,
-                "data_loading_time": data_loading_time,
-                "forward_time": forward_start_event.elapsed_time(forward_end_event) / 1000,
-                "backward_time": backward_start_event.elapsed_time(backward_end_event) / 1000,
-                "optimizer_time": optimizer_start_event.elapsed_time(optimizer_end_event) / 1000,
+                "data_time": data_loading_time,
+                "for-back_time": forward_start_event.elapsed_time(forward_end_event) / 1000,
+                "optim_time": backward_start_event.elapsed_time(backward_end_event) / 1000,
+                "upd_time": optimizer_start_event.elapsed_time(optimizer_end_event) / 1000,
                 **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
             }, step=iteration)
 
