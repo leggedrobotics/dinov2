@@ -17,7 +17,7 @@ from dinov2.utils.param_groups import get_params_groups_with_decay, fuse_params_
 from dinov2.fsdp import get_fsdp_wrapper, ShardedGradScaler, get_fsdp_modules, reshard_fsdp_model
 
 from dinov2.models.vision_transformer import BlockChunk
-
+import time
 
 try:
     from xformers.ops import fmha
@@ -130,10 +130,16 @@ class SSLMetaArch(nn.Module):
             loss.backward()
 
     def forward_backward(self, images, teacher_temp):
+        torch.cuda.synchronize()
+        start_total = time.time()  # Full function timing
+    
         n_global_crops = 2
         assert n_global_crops == 2
         n_local_crops = self.cfg.crops.local_crops_number
 
+        # 1. Move Data to GPU
+        torch.cuda.synchronize()
+        start_data = time.time()
         global_crops = images["collated_global_crops"].cuda(non_blocking=True)
         local_crops = images["collated_local_crops"].cuda(non_blocking=True)
 
@@ -143,6 +149,9 @@ class SSLMetaArch(nn.Module):
         n_masked_patches = mask_indices_list.shape[0]
         upperbound = images["upperbound"]
         masks_weight = images["masks_weight"].cuda(non_blocking=True)
+
+        torch.cuda.synchronize()
+        data_loading_time = time.time() - start_data
 
         n_local_crops_loss_terms = max(n_local_crops * n_global_crops, 1)
         n_global_crops_loss_terms = (n_global_crops - 1) * n_global_crops
@@ -226,16 +235,32 @@ class SSLMetaArch(nn.Module):
 
             return teacher_dino_softmaxed_centered_list, masked_teacher_ibot_softmaxed_centered
 
+         # 2. Teacher Forward Pass
+        torch.cuda.synchronize()
+        start_teacher = time.time()
+
         teacher_dino_softmaxed_centered_list, masked_teacher_ibot_softmaxed_centered = get_teacher_output()
         reshard_fsdp_model(self.teacher)
+
+        torch.cuda.synchronize()
+        teacher_forward_time = time.time() - start_teacher
 
         loss_dict = {}
 
         loss_accumulator = 0  # for backprop
+
+         # 3. Student Forward Pass
+        torch.cuda.synchronize()
+        start_forward = time.time()
+
         student_global_backbone_output_dict, student_local_backbone_output_dict = self.student.backbone(
             [global_crops, local_crops], masks=[masks, None], is_training=True
         )
 
+        torch.cuda.synchronize()
+        student_forward_time = time.time() - start_forward
+
+        start_loss = time.time()
         inputs_for_student_head_list = []
 
         # 1a: local crops cls tokens
@@ -339,9 +364,32 @@ class SSLMetaArch(nn.Module):
             # accumulate loss
             loss_accumulator += self.ibot_loss_weight * ibot_patch_loss
 
-        self.backprop_loss(loss_accumulator)
+        torch.cuda.synchronize()
+        loss_time = time.time() - start_loss
 
+        start_backward = time.time()
+        self.backprop_loss(loss_accumulator)
+        torch.cuda.synchronize()
+        backward_time = time.time() - start_backward
+
+        start_sync_fsdp = time.time()
         self.fsdp_synchronize_streams()
+        torch.cuda.synchronize()
+        sync_fsdp_time = time.time() - sync_fsdp_time
+
+        total_time = time.time() - start_total
+
+        logger.info(
+        f"Forward-Backward Timing Breakdown:\n"
+        f" - Data Loading: {data_loading_time:.4f}s\n"
+        f" - Teacher Forward: {teacher_forward_time:.4f}s\n"
+        f" - Student Forward: {student_forward_time:.4f}s\n"
+        # f" - Attention Bias: {attn_time:.4f}s\n"
+        f" - Loss Computation: {loss_time:.4f}s\n"
+        f" - Backward: {backward_time:.4f}s\n"
+        f" - FSDP Sync: {sync_fsdp_time:.4f}s\n"
+        f" - Total: {total_time:.4f}s\n"
+        )
 
         return loss_dict
 
