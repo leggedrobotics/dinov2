@@ -243,11 +243,16 @@ def do_train(cfg, model, resume=False):
     header = "Training"
 
     # CUDA events for measuring GPU timings
-    data_load_event = torch.cuda.Event(enable_timing=True)
-    forward_event = torch.cuda.Event(enable_timing=True)
-    backward_event = torch.cuda.Event(enable_timing=True)
-    optimizer_event = torch.cuda.Event(enable_timing=True)
+    data_load_start_event = torch.cuda.Event(enable_timing=True)
+    data_load_end_event = torch.cuda.Event(enable_timing=True)
+    forward_start_event = torch.cuda.Event(enable_timing=True)
+    forward_end_event = torch.cuda.Event(enable_timing=True)
+    backward_start_event = torch.cuda.Event(enable_timing=True)
+    backward_end_event = torch.cuda.Event(enable_timing=True)
+    optimizer_start_event = torch.cuda.Event(enable_timing=True)
+    optimizer_end_event = torch.cuda.Event(enable_timing=True)
 
+    prev_end_time = time.time()
 
     for data in metric_logger.log_every(
         data_loader,
@@ -268,20 +273,22 @@ def do_train(cfg, model, resume=False):
         last_layer_lr = last_layer_lr_schedule[iteration]
         apply_optim_scheduler(optimizer, lr, wd, last_layer_lr)
 
-        # ⏳ Start Timing Data Loading
-        torch.cuda.synchronize()
-        start_time = time.time()
-        data_load_event.record()
+        # ⏳ **1️⃣ Measure Data Loading Time (CPU)**
+        torch.cuda.synchronize()  # Ensure previous GPU operations finish
+        data_loading_time = time.time() - prev_end_time  # Time since last batch processing ended
 
-        # ⏳ Compute Losses (Forward Pass)
-        forward_event.record()
+        iteration_start = time.time()  # Start of iteration
+
+        # ⏳ **2️⃣ Forward Pass**
+        torch.cuda.synchronize()
+        forward_start_event.record()
         optimizer.zero_grad(set_to_none=True)
         loss_dict = model.forward_backward(data, teacher_temp=teacher_temp)
-        forward_time = time.time() - start_time
+        forward_end_event.record()
 
-        # ⏳ Backward Pass
-        start_time = time.time()
-        backward_event.record()
+        # ⏳ **3️⃣ Backward Pass**
+        torch.cuda.synchronize()
+        backward_start_event.record()
         if fp16_scaler is not None:
             if cfg.optim.clip_grad:
                 fp16_scaler.unscale_(optimizer)
@@ -293,15 +300,16 @@ def do_train(cfg, model, resume=False):
             if cfg.optim.clip_grad:
                 for v in model.student.values():
                     v.clip_grad_norm_(cfg.optim.clip_grad)
-                optimizer.step()
-        backward_time = time.time() - start_time
+            optimizer.step()  # Ensure optimizer.step() is outside clip_grad check
+        backward_end_event.record()
 
-        # ⏳ Optimizer Step
-        start_time = time.time()
-        optimizer_event.record()
+        # ⏳ **4️⃣ Optimizer Step**
+        torch.cuda.synchronize()
+        optimizer_start_event.record()
         model.update_teacher(mom)
-        optimizer_time = time.time() - start_time
+        optimizer_end_event.record()
 
+        # Synchronize GPU to ensure timings are correct
         torch.cuda.synchronize()
 
         # Logging
@@ -322,12 +330,12 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(current_batch_size=current_batch_size)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
 
-        # ✅ Add timing logs
+        # ✅ **5️⃣ Add Timing Logs**
         metric_logger.update(
-            data_loading_time=data_load_event.elapsed_time(forward_event) / 1000,
-            forward_time=forward_time,
-            backward_time=backward_time,
-            optimizer_time=optimizer_time,
+            data_loading_time=data_loading_time,
+            forward_time=forward_start_event.elapsed_time(forward_end_event) / 1000,
+            backward_time=backward_start_event.elapsed_time(backward_end_event) / 1000,
+            optimizer_time=optimizer_start_event.elapsed_time(optimizer_end_event) / 1000,
         )
 
         if distributed.is_main_process():
@@ -338,10 +346,10 @@ def do_train(cfg, model, resume=False):
                 "last_layer_lr": last_layer_lr,
                 "batch_size": current_batch_size,
                 "total_loss": losses_reduced,
-                "data_loading_time": data_load_event.elapsed_time(forward_event) / 1000,
-                "forward_time": forward_time,
-                "backward_time": backward_time,
-                "optimizer_time": optimizer_time,
+                "data_loading_time": data_loading_time,
+                "forward_time": forward_start_event.elapsed_time(forward_end_event) / 1000,
+                "backward_time": backward_start_event.elapsed_time(backward_end_event) / 1000,
+                "optimizer_time": optimizer_start_event.elapsed_time(optimizer_end_event) / 1000,
                 **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
             }, step=iteration)
 
@@ -352,6 +360,7 @@ def do_train(cfg, model, resume=False):
         periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
+        prev_end_time = time.time()  # Update timing for next data loading measurement
 
     metric_logger.synchronize_between_processes()
 
