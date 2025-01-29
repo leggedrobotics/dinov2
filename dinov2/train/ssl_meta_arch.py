@@ -375,7 +375,7 @@ class SSLMetaArch(nn.Module):
         start_sync_fsdp = time.time()
         self.fsdp_synchronize_streams()
         torch.cuda.synchronize()
-        sync_fsdp_time = time.time() - sync_fsdp_time
+        sync_fsdp_time = time.time() - start_sync_fsdp
 
         total_time = time.time() - start_total
 
