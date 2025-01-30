@@ -36,7 +36,7 @@ class GFMDataset(ExtendedVisionDataset):
         # Load the metadata from JSON
         metadata_file_path = os.path.join(root, metadata_file)
         with open(metadata_file_path, 'r') as f:
-            dataset_info = json.load(f)
+            self.dataset_info = json.load(f)
         
         for file_index, entry in enumerate(self.dataset_info):
             filename = entry["filename"]
