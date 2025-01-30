@@ -38,25 +38,36 @@ class GFMDataset(ExtendedVisionDataset):
         with open(metadata_file_path, 'r') as f:
             dataset_info = json.load(f)
         
-        # Open HDF5 files and build a list of image indices
-        for file_index, entry in enumerate(dataset_info):
-            filename = entry['filename']
-            h5_path = os.path.join(root, filename)
-            if not os.path.exists(h5_path):
-                raise FileNotFoundError(f"HDF5 file {filename} not found in {root}")
-
-            # Open HDF5 file and keep it open for later access
-            h5_file = h5py.File(h5_path, 'r')
-            self.h5_files.append(h5_file)
-
-            # Add image keys for each class in the file
-            class_name = entry['class_name']
-            image_keys = entry['image_keys']
+        for file_index, entry in enumerate(self.dataset_info):
+            filename = entry["filename"]
+            class_name = entry["class_name"]
+            image_keys = entry["image_keys"]
             self.image_indices.extend([(file_index, class_name, image_key) for image_key in image_keys])
+
+        # # Open HDF5 files and build a list of image indices
+        # for file_index, entry in enumerate(dataset_info):
+        #     filename = entry['filename']
+        #     h5_path = os.path.join(root, filename)
+        #     if not os.path.exists(h5_path):
+        #         raise FileNotFoundError(f"HDF5 file {filename} not found in {root}")
+
+        #     # Open HDF5 file and keep it open for later access
+        #     h5_file = h5py.File(h5_path, 'r')
+        #     self.h5_files.append(h5_file)
+
+        #     # Add image keys for each class in the file
+        #     class_name = entry['class_name']
+        #     image_keys = entry['image_keys']
+        #     self.image_indices.extend([(file_index, class_name, image_key) for image_key in image_keys])
 
         print(f"Loaded dataset metadata from {metadata_file}")
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
+
+        if self.h5_files is None:
+            self.h5_files = [h5py.File(os.path.join(self.root, entry["filename"]), "r", swmr=True, libver="latest")
+                             for entry in self.dataset_info]
+            
         try:
             image = self.get_image_data(index)
             # image = ImageDataDecoder(image_data).decode()

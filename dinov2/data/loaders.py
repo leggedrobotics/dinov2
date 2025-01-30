@@ -9,6 +9,9 @@ from typing import Any, Callable, List, Optional, TypeVar
 
 import torch
 from torch.utils.data import Sampler
+import torch.utils.data
+import os
+import h5py
 
 from .datasets import ImageNet, ImageNet22k, ImageNetDepth, GFMDataset
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
@@ -168,6 +171,15 @@ def _make_sampler(
 
 T = TypeVar("T")
 
+def worker_init_fn(worker_id):
+    """Ensure each worker has its own HDF5 file instance"""
+    worker_info = torch.utils.data.get_worker_info()
+    dataset = worker_info.dataset
+    dataset.h5_files = []  # Reset per worker
+    for file_index, entry in enumerate(dataset.dataset_info):
+        filename = entry["filename"]
+        h5_path = os.path.join(dataset.root, filename)
+        dataset.h5_files.append(h5py.File(h5_path, "r", swmr=True, libver="latest"))
 
 def make_data_loader(
     *,
@@ -219,6 +231,7 @@ def make_data_loader(
         drop_last=drop_last,
         persistent_workers=persistent_workers,
         collate_fn=collate_fn,
+        worker_init_fn=worker_init_fn,
     )
 
     try:
