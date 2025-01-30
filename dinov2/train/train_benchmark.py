@@ -265,70 +265,70 @@ def do_train(cfg, model, resume=False):
         torch.cuda.synchronize()  # Ensure previous GPU operations finish
         data_loading_time = time.time() - prev_end_time  # Time since last batch processing ended
 
-        current_batch_size = data["collated_global_crops"].shape[0] / 2
-        if iteration > max_iter:
-            return
+        # current_batch_size = data["collated_global_crops"].shape[0] / 2
+        # if iteration > max_iter:
+        #     return
 
-        # Apply schedules
-        lr = lr_schedule[iteration]
-        wd = wd_schedule[iteration]
-        mom = momentum_schedule[iteration]
-        teacher_temp = teacher_temp_schedule[iteration]
-        last_layer_lr = last_layer_lr_schedule[iteration]
-        apply_optim_scheduler(optimizer, lr, wd, last_layer_lr)
+        # # Apply schedules
+        # lr = lr_schedule[iteration]
+        # wd = wd_schedule[iteration]
+        # mom = momentum_schedule[iteration]
+        # teacher_temp = teacher_temp_schedule[iteration]
+        # last_layer_lr = last_layer_lr_schedule[iteration]
+        # apply_optim_scheduler(optimizer, lr, wd, last_layer_lr)
 
-        iteration_start = time.time()  # Start of iteration
+        # iteration_start = time.time()  # Start of iteration
 
-        # ⏳ **2️⃣ Forward Pass**
-        torch.cuda.synchronize()
-        forward_start_event.record()
-        optimizer.zero_grad(set_to_none=True)
-        loss_dict = model.forward_backward(data, teacher_temp=teacher_temp)
-        forward_end_event.record()
+        # # ⏳ **2️⃣ Forward Pass**
+        # torch.cuda.synchronize()
+        # forward_start_event.record()
+        # optimizer.zero_grad(set_to_none=True)
+        # loss_dict = model.forward_backward(data, teacher_temp=teacher_temp)
+        # forward_end_event.record()
 
-        # ⏳ **3️⃣ Backward Pass**
-        torch.cuda.synchronize()
-        backward_start_event.record()
-        if fp16_scaler is not None:
-            if cfg.optim.clip_grad:
-                fp16_scaler.unscale_(optimizer)
-                for v in model.student.values():
-                    v.clip_grad_norm_(cfg.optim.clip_grad)
-            fp16_scaler.step(optimizer)
-            fp16_scaler.update()
-        else:
-            if cfg.optim.clip_grad:
-                for v in model.student.values():
-                    v.clip_grad_norm_(cfg.optim.clip_grad)
-            optimizer.step()  # Ensure optimizer.step() is outside clip_grad check
-        backward_end_event.record()
+        # # ⏳ **3️⃣ Backward Pass**
+        # torch.cuda.synchronize()
+        # backward_start_event.record()
+        # if fp16_scaler is not None:
+        #     if cfg.optim.clip_grad:
+        #         fp16_scaler.unscale_(optimizer)
+        #         for v in model.student.values():
+        #             v.clip_grad_norm_(cfg.optim.clip_grad)
+        #     fp16_scaler.step(optimizer)
+        #     fp16_scaler.update()
+        # else:
+        #     if cfg.optim.clip_grad:
+        #         for v in model.student.values():
+        #             v.clip_grad_norm_(cfg.optim.clip_grad)
+        #     optimizer.step()  # Ensure optimizer.step() is outside clip_grad check
+        # backward_end_event.record()
 
-        # ⏳ **4️⃣ Optimizer Step**
-        torch.cuda.synchronize()
-        optimizer_start_event.record()
-        model.update_teacher(mom)
-        optimizer_end_event.record()
+        # # ⏳ **4️⃣ Optimizer Step**
+        # torch.cuda.synchronize()
+        # optimizer_start_event.record()
+        # model.update_teacher(mom)
+        # optimizer_end_event.record()
 
-        # Synchronize GPU to ensure timings are correct
-        torch.cuda.synchronize()
+        # # Synchronize GPU to ensure timings are correct
+        # torch.cuda.synchronize()
 
-        # Logging
-        if distributed.get_global_size() > 1:
-            for v in loss_dict.values():
-                torch.distributed.all_reduce(v)
-        loss_dict_reduced = {k: v.item() / distributed.get_global_size() for k, v in loss_dict.items()}
+        # # Logging
+        # if distributed.get_global_size() > 1:
+        #     for v in loss_dict.values():
+        #         torch.distributed.all_reduce(v)
+        # loss_dict_reduced = {k: v.item() / distributed.get_global_size() for k, v in loss_dict.items()}
 
-        if math.isnan(sum(loss_dict_reduced.values())):
-            logger.info("NaN detected")
-            raise AssertionError
-        losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+        # if math.isnan(sum(loss_dict_reduced.values())):
+        #     logger.info("NaN detected")
+        #     raise AssertionError
+        # losses_reduced = sum(loss for loss in loss_dict_reduced.values())
 
-        metric_logger.update(lr=lr)
-        metric_logger.update(wd=wd)
-        metric_logger.update(mom=mom)
-        metric_logger.update(last_layer_lr=last_layer_lr)
-        metric_logger.update(current_batch_size=current_batch_size)
-        metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
+        # metric_logger.update(lr=lr)
+        # metric_logger.update(wd=wd)
+        # metric_logger.update(mom=mom)
+        # metric_logger.update(last_layer_lr=last_layer_lr)
+        # metric_logger.update(current_batch_size=current_batch_size)
+        # metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
 
         # ✅ **5️⃣ Add Timing Logs**
         metric_logger.update(
@@ -340,17 +340,17 @@ def do_train(cfg, model, resume=False):
 
         if distributed.is_main_process():
             wandb.log({
-                "lr": lr,
-                "weight_decay": wd,
-                "momentum": mom,
-                "last_layer_lr": last_layer_lr,
-                "batch_size": current_batch_size,
-                "total_loss": losses_reduced,
+                # "lr": lr,
+                # "weight_decay": wd,
+                # "momentum": mom,
+                # "last_layer_lr": last_layer_lr,
+                # "batch_size": current_batch_size,
+                # "total_loss": losses_reduced,
                 "data_time": data_loading_time,
-                "for-back_time": forward_start_event.elapsed_time(forward_end_event) / 1000,
-                "optim_time": backward_start_event.elapsed_time(backward_end_event) / 1000,
-                "upd_time": optimizer_start_event.elapsed_time(optimizer_end_event) / 1000,
-                **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
+                # "for-back_time": forward_start_event.elapsed_time(forward_end_event) / 1000,
+                # "optim_time": backward_start_event.elapsed_time(backward_end_event) / 1000,
+                # "upd_time": optimizer_start_event.elapsed_time(optimizer_end_event) / 1000,
+                # **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
             }, step=iteration)
 
         # Checkpointing and testing
