@@ -333,9 +333,9 @@ def do_train(cfg, model, resume=False):
         # ✅ **5️⃣ Add Timing Logs**
         metric_logger.update(
             data_loading_time=data_loading_time,
-            forward_time=forward_start_event.elapsed_time(forward_end_event) / 1000,
-            backward_time=backward_start_event.elapsed_time(backward_end_event) / 1000,
-            optimizer_time=optimizer_start_event.elapsed_time(optimizer_end_event) / 1000,
+            # forward_time=forward_start_event.elapsed_time(forward_end_event) / 1000,
+            # backward_time=backward_start_event.elapsed_time(backward_end_event) / 1000,
+            # optimizer_time=optimizer_start_event.elapsed_time(optimizer_end_event) / 1000,
         )
 
         if distributed.is_main_process():
@@ -353,11 +353,11 @@ def do_train(cfg, model, resume=False):
                 # **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
             }, step=iteration)
 
-        # Checkpointing and testing
-        if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
-            do_test(cfg, model, f"training_{iteration}")
-            torch.cuda.synchronize()
-        periodic_checkpointer.step(iteration)
+        # # Checkpointing and testing
+        # if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
+        #     do_test(cfg, model, f"training_{iteration}")
+        #     torch.cuda.synchronize()
+        # periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
         prev_end_time = time.time()  # Update timing for next data loading measurement
