@@ -1,0 +1,11 @@
+# this corresponds to the default config
+train:
+  dataset_path: ImageNet:split=TRAIN
+  batch_size_per_gpu: 64
+  num_workers: 4
+student:
+  block_chunks: 4
+augmentations:
+  norm: imagenet
+  gaussian_blur: false
+  color_jitter: false

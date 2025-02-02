@@ -11,6 +11,8 @@ import torch
 from .transforms import (
     GaussianBlur,
     make_normalize_transform,
+    DEPTH_DEFAULT_MEAN,
+    DEPTH_DEFAULT_STD
 )
 
 
@@ -110,7 +112,7 @@ class DataAugmentationDINODepth(object):
         self.normalize = transforms.Compose(
             [
                 transforms.ToTensor(),
-                make_normalize_transform(),
+                make_normalize_transform(DEPTH_DEFAULT_MEAN, DEPTH_DEFAULT_STD),
             ]
         )
 

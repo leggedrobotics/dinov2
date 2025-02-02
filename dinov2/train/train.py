@@ -57,7 +57,6 @@ For python-based LazyConfig, use "path.key=value".
     )
     parser.add_argument("--local-rank", default=0, type=int, help="Variable for distributed computing.")
     parser.add_argument("--exp-name", default="dinov2", type=str, help="Experiment name")
-
     return parser
 
 
@@ -186,21 +185,16 @@ def do_train(cfg, model, resume=False):
         max_num_patches=0.5 * img_size // patch_size * img_size // patch_size,
     )
 
-    # data_transform = DataAugmentationDINO(
-    #     cfg.crops.global_crops_scale,
-    #     cfg.crops.local_crops_scale,
-    #     cfg.crops.local_crops_number,
-    #     global_crops_size=cfg.crops.global_crops_size,
-    #     local_crops_size=cfg.crops.local_crops_size,
-    # )
-    data_transform = DataAugmentationDINODepth(
+    data_transform = DataAugmentationDINO(
         cfg.crops.global_crops_scale,
         cfg.crops.local_crops_scale,
         cfg.crops.local_crops_number,
         global_crops_size=cfg.crops.global_crops_size,
         local_crops_size=cfg.crops.local_crops_size,
+        gaussian_blur=cfg.augmentations.gaussian_blur,
+        norm=cfg.augmentations.norm,
+        color_jitter=cfg.augmentations.color_jitter
     )
-
 
     collate_fn = partial(
         collate_data_and_cast,

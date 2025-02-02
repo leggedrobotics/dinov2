@@ -5,3 +5,7 @@ train:
   num_workers: 4
 student:
   block_chunks: 4
+augmentations:
+  norm: imagenet
+  gaussian_blur: true
+  color_jitter: true

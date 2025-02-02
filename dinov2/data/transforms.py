@@ -39,16 +39,16 @@ class MaybeToTensor(transforms.ToTensor):
 
 
 # Original Image-net mean and std
-# IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
-# IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 
 # Depth Image-net mean and std
 # IMAGENET_DEFAULT_MEAN = (0.6698, 0.6393, 0.5696)
 # IMAGENET_DEFAULT_STD = (0.2761, 0.2345, 0.1412)
 
 # Depth Image-net mean and std (for min-max normalization) Standard Value
-IMAGENET_DEFAULT_MEAN = (0.5, 0.5, 0.5)
-IMAGENET_DEFAULT_STD = (0.2, 0.2, 0.2)
+DEPTH_DEFAULT_MEAN = (0.5, 0.5, 0.5)
+DEPTH_DEFAULT_STD = (0.2, 0.2, 0.2)
 
 # Depth Image-net mean and std (for min-max normalization) Computed Value
 # IMAGENET_DEFAULT_MEAN = (0.393, 0.393, 0.393)

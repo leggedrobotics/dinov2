@@ -8,8 +8,11 @@ import logging
 from torchvision import transforms
 
 from .transforms import (
+    DEPTH_DEFAULT_MEAN,
+    DEPTH_DEFAULT_STD,
     GaussianBlur,
     make_normalize_transform,
+    IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 )
 
 
@@ -24,6 +27,9 @@ class DataAugmentationDINO(object):
         local_crops_number,
         global_crops_size=224,
         local_crops_size=96,
+        norm='imagenet',
+        color_jitter=True,
+        gaussian_blur=True,
     ):
         self.global_crops_scale = global_crops_scale
         self.local_crops_scale = local_crops_scale
@@ -59,39 +65,62 @@ class DataAugmentationDINO(object):
             ]
         )
 
+        global_transfo1 = []
+        global_transfo2 = []
+        local_transfo = []
+
         # color distorsions / blurring
-        color_jittering = transforms.Compose(
-            [
-                transforms.RandomApply(
-                    [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
-                    p=0.8,
-                ),
-                transforms.RandomGrayscale(p=0.2),
-            ]
-        )
+        if color_jitter:
+            print("Using color jitter...")
+            color_jittering = transforms.Compose(
+                [
+                    transforms.RandomApply(
+                        [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                        p=0.8,
+                    ),
+                    transforms.RandomGrayscale(p=0.2),
+                ]
+            )
+            for lst in [global_transfo1, global_transfo2, local_transfo]:
+                lst.append(color_jittering)
 
-        global_transfo1_extra = GaussianBlur(p=1.0)
+        if gaussian_blur:
+            print("Using gaussian blur...")
+            global_transfo1.append(GaussianBlur(p=1.0))
+            global_transfo2.append(transforms.Compose(
+                [
+                    GaussianBlur(p=0.1),
+                    transforms.RandomSolarize(threshold=128, p=0.2),
+                ]
+            ))
+            local_transfo.append(GaussianBlur(p=0.5))
 
-        global_transfo2_extra = transforms.Compose(
-            [
-                GaussianBlur(p=0.1),
-                transforms.RandomSolarize(threshold=128, p=0.2),
-            ]
-        )
-
-        local_transfo_extra = GaussianBlur(p=0.5)
 
         # normalization
+        if norm == 'imagenet':
+            print("Using imagenet norm...")
+            mean = IMAGENET_DEFAULT_MEAN
+            std = IMAGENET_DEFAULT_STD
+        elif norm == 'minmax':
+            print("Using minmax norm...")
+            mean = DEPTH_DEFAULT_MEAN
+            std = DEPTH_DEFAULT_STD
+        else:
+            raise ValueError("Wrong norm")
+        
         self.normalize = transforms.Compose(
             [
                 transforms.ToTensor(),
-                make_normalize_transform(),
+                make_normalize_transform(mean, std),
             ]
         )
+        for lst in [global_transfo1, global_transfo2, local_transfo]:
+            lst.append(self.normalize)
 
-        self.global_transfo1 = transforms.Compose([color_jittering, global_transfo1_extra, self.normalize])
-        self.global_transfo2 = transforms.Compose([color_jittering, global_transfo2_extra, self.normalize])
-        self.local_transfo = transforms.Compose([color_jittering, local_transfo_extra, self.normalize])
+
+        self.global_transfo1 = transforms.Compose(global_transfo1)
+        self.global_transfo2 = transforms.Compose(global_transfo2)
+        self.local_transfo = transforms.Compose(local_transfo)
 
     def __call__(self, image):
         output = {}
