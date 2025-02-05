@@ -232,6 +232,7 @@ def make_data_loader(
         persistent_workers=persistent_workers,
         collate_fn=collate_fn,
         worker_init_fn=worker_init_fn,
+        prefetch_factor=2,
     )
 
     try:
