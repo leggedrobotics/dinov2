@@ -13,7 +13,7 @@ import torch.utils.data
 import os
 import h5py
 
-from .datasets import ImageNet, ImageNet22k, ImageNetDepth, GFMDataset
+from .datasets import ImageNet, ImageNet22k, ImageNetDepth, GFMDataset, WebDatasetVision
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 
@@ -67,6 +67,8 @@ def _parse_dataset_str(dataset_str: str):
         class_ = ImageNet22k
     elif name == "GFMDataset":
         class_ = GFMDataset
+    elif name == "WebDatasetVision":
+        class_ = WebDatasetVision
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 
@@ -104,7 +106,6 @@ def make_dataset(
         setattr(dataset, "target_transform", target_transform)
 
     return dataset
-
 
 def _make_sampler(
     *,
@@ -211,29 +212,55 @@ def make_data_loader(
         persistent_workers: maintain the workers Dataset instances alive after a dataset has been consumed once.
         collate_fn: Function that performs batch collation
     """
-
-    sampler = _make_sampler(
+    logger.info("using PyTorch data loader")
+    # Check the dataset class 
+    if isinstance(dataset, WebDatasetVision):
+        data_loader = torch.utils.data.DataLoader(
+            dataset.dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=drop_last,
+            persistent_workers=persistent_workers,
+            collate_fn=collate_fn,
+            prefetch_factor=1,
+        )
+    
+    else:
+        sampler = _make_sampler(
         dataset=dataset,
         type=sampler_type,
         shuffle=shuffle,
         seed=seed,
         size=sampler_size,
         advance=sampler_advance,
-    )
+        )
 
-    logger.info("using PyTorch data loader")
-    data_loader = torch.utils.data.DataLoader(
-        dataset,
-        sampler=sampler,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
-        drop_last=drop_last,
-        persistent_workers=persistent_workers,
-        collate_fn=collate_fn,
-        worker_init_fn=worker_init_fn,
-        prefetch_factor=2,
-    )
+        if isinstance(dataset, GFMDataset):
+            data_loader = torch.utils.data.DataLoader(
+                dataset,
+                sampler=sampler,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                pin_memory=True,
+                drop_last=drop_last,
+                persistent_workers=persistent_workers,
+                collate_fn=collate_fn,
+                worker_init_fn=worker_init_fn,
+                prefetch_factor=1,
+            )
+        else:
+            data_loader = torch.utils.data.DataLoader(
+                dataset,
+                sampler=sampler,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                pin_memory=True,
+                drop_last=drop_last,
+                persistent_workers=persistent_workers,
+                collate_fn=collate_fn,
+                prefetch_factor=1,
+            )
 
     try:
         logger.info(f"# of batches: {len(data_loader):,d}")
