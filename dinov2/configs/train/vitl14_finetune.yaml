@@ -85,7 +85,7 @@ student:
   interpolate_antialias: false
   interpolate_offset: 0.1
 teacher:
-  momentum_teacher: 0.992
+  momentum_teacher: 0.994
   final_momentum_teacher: 1
   warmup_teacher_temp: 0.04
   teacher_temp: 0.07
