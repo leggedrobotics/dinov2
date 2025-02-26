@@ -5,6 +5,7 @@
 
 from functools import partial
 import logging
+import os
 
 import torch
 from torch import nn
@@ -17,7 +18,6 @@ from dinov2.utils.param_groups import get_params_groups_with_decay, fuse_params_
 from dinov2.fsdp import get_fsdp_wrapper, ShardedGradScaler, get_fsdp_modules, reshard_fsdp_model
 
 from dinov2.models.vision_transformer import BlockChunk
-import time
 
 try:
     from xformers.ops import fmha
@@ -27,6 +27,39 @@ except ImportError:
 
 logger = logging.getLogger("dinov2")
 
+import math
+import torch.nn.functional as nnf
+
+# this is an adapted version of the interpolate_pos_encoding in the vision_transformer.py to change the shape of the positional encoding
+def interpolate_pos_encoding(x, w, h):
+    N = x.shape[1] - 1
+    dim = x.shape[-1]
+    w0 = w / int(math.sqrt(N))
+    h0 = h / int(math.sqrt(N))
+
+    # Interpolate the position embeddings without changing the first row (class token)
+    patch_pos_embed = nnf.interpolate(
+        x[:, 1:].reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+        scale_factor=(w0, h0),
+        mode="bicubic",
+    )
+
+    patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+
+    # Concatenate the class token with the interpolated position embeddings
+    return torch.cat((x[:, :1], patch_pos_embed), dim=1)
+
+# this function returns either a vit_s or vit_g, depending on what is commented out. the model is loaded with from torch.hub wih the weights and the positional encoding is reshaped.
+def get_downloaded_dino_interpolated():
+    model=torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14')
+    #model=torch.hub.load('facebookresearch/dinov2', 'dinov2_vitg14')
+    input_tensor = model.pos_embed
+    tensor_corr_shape = interpolate_pos_encoding(input_tensor, 16, 16)
+    pos_embed = nn.Parameter(torch.zeros(1, 257))
+    pos_embed.data = tensor_corr_shape
+    model.pos_embed = pos_embed
+
+    return model
 
 class SSLMetaArch(nn.Module):
     def __init__(self, cfg):
@@ -37,7 +70,17 @@ class SSLMetaArch(nn.Module):
         student_model_dict = dict()
         teacher_model_dict = dict()
 
-        student_backbone, teacher_backbone, embed_dim = build_model_from_cfg(cfg)
+        # This is commented out, because it was easier to create the model using the torch.hub, as this already returns the pretrained version with the correct architecture.
+        if self.cfg.train.finetune:
+            _, _, embed_dim = build_model_from_cfg(cfg)
+
+            logger.info(f"Using Pretrained weights from torchHub : embed_dim: {embed_dim}")
+            # use for interpolated loading downloaded weights
+            student_backbone = get_downloaded_dino_interpolated()
+            teacher_backbone = get_downloaded_dino_interpolated()
+        else:
+            student_backbone, teacher_backbone, embed_dim = build_model_from_cfg(cfg)
+            
         student_model_dict["backbone"] = student_backbone
         teacher_model_dict["backbone"] = teacher_backbone
         logger.info(f"OPTIONS -- architecture : embed_dim: {embed_dim}")
@@ -118,6 +161,9 @@ class SSLMetaArch(nn.Module):
         # there is no backpropagation through the teacher, so no need for gradients
         for p in self.teacher.parameters():
             p.requires_grad = False
+        # for student activate backprop
+        for p in self.student.parameters():
+            p.requires_grad = True
         logger.info(f"Student and Teacher are built: they are both {cfg.student.arch} network.")
 
     def forward(self, inputs):

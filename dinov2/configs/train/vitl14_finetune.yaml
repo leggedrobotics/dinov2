@@ -61,17 +61,17 @@ ibot:
 train:
   batch_size_per_gpu: 64
   dataset_path: ImageNet:split=TRAIN
-  finetune: false
+  finetune: true
   output_dir: .
   saveckp_freq: 20
   seed: 0
   num_workers: 10
   OFFICIAL_EPOCH_LENGTH: 1250
   cache_dataset: true
-  centering: "centering" # or "sinkhorn_knopp"
+  centering: "sinkhorn_knopp" # or "sinkhorn_knopp"
 student:
   arch: vit_large
-  patch_size: 16
+  patch_size: 14
   drop_path_rate: 0.3
   layerscale: 1.0e-05
   drop_path_uniform: true
@@ -94,7 +94,7 @@ optim:
   epochs: 100
   weight_decay: 0.04
   weight_decay_end: 0.4
-  base_lr: 0.004  # learning rate for a batch size of 1024
+  base_lr: 2.0e-4  # learning rate for a batch size of 1024
   lr: 0.  # will be set after applying scaling rule
   warmup_epochs: 10
   min_lr: 1.0e-06
@@ -114,6 +114,6 @@ crops:
   - 0.05
   - 0.32
   global_crops_size: 224
-  local_crops_size: 96
+  local_crops_size: 98
 evaluation:
   eval_period_iterations: 12500
