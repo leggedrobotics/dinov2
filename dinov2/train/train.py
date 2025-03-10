@@ -24,6 +24,9 @@ from dinov2.train.ssl_meta_arch import SSLMetaArch
 import wandb
 from omegaconf import OmegaConf
 
+import torch.multiprocessing as mp
+mp.set_start_method('spawn', force=True)
+
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
 
@@ -202,6 +205,7 @@ def do_train(cfg, model, resume=False):
     )
 
 
+
     collate_fn = partial(
         collate_data_and_cast,
         mask_ratio_tuple=cfg.ibot.mask_ratio_min_max,
@@ -216,8 +220,14 @@ def do_train(cfg, model, resume=False):
     dataset = make_dataset(
         dataset_str=cfg.train.dataset_path,
         transform=data_transform,
-        target_transform=lambda _: (),
+        target_transform=None,  
     )
+    # dataset = make_dataset(
+    #     dataset_str=cfg.train.dataset_path,
+    #     transform=data_transform,
+    #     target_transform=lambda _: (),
+    # )
+
     # sampler_type = SamplerType.INFINITE
     sampler_type = SamplerType.SHARDED_INFINITE
     data_loader = make_data_loader(
