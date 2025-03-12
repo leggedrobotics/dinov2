@@ -13,7 +13,7 @@ import torch.utils.data
 import os
 import h5py
 
-from .datasets import ImageNet, ImageNet22k, ImageNetDepth, GFMDataset, WebDatasetVision
+from .datasets import ImageNet, ImageNet22k, ImageNetDepth, GFMDataset,WebDatasetVisionPNG, WebDatasetVision
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 
@@ -69,6 +69,8 @@ def _parse_dataset_str(dataset_str: str):
         class_ = GFMDataset
     elif name == "WebDatasetVision":
         class_ = WebDatasetVision
+    elif name == "WebDatasetVisionPNG":
+        class_ = WebDatasetVisionPNG
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 

@@ -77,3 +77,52 @@ class WebDatasetVision(VisionDataset):
     def __len__(self):
         """Returns an estimated length of the dataset."""
         return self.estimated_num_samples
+    
+class WebDatasetVisionPNG(WebDatasetVision):
+    def __init__(
+        self,
+        root: str,
+        transforms: Optional[Callable] = None,
+        transform: Optional[Callable] = None,
+        target_transform: Optional[Callable] = None,
+        images_per_shard=3300,
+        shard_pattern: str = "*.tar",  # Pattern for WebDataset shards
+        shuffle_buffer: int = 10000,  # Number of samples for shuffle
+    ):
+        super().__init__(
+            root, transforms, transform, target_transform, images_per_shard, shard_pattern, shuffle_buffer
+        )
+
+        # Create the WebDataset pipeline
+        self.dataset = (
+            wds.WebDataset(self.shard_files, resampled=True, nodesplitter=wds.split_by_node)
+            .shuffle(shuffle_buffer)
+            .to_tuple("png", "json")  # Expect .png images & .json metadata
+            .map(self.process_sample)
+        )
+
+    def process_sample(self, sample):
+        """Process a single sample (depth image & metadata)."""
+        png_data, json_data = sample
+        
+        image = self.decode_png(png_data)
+        metadata = self.safe_json_decode(json_data)
+        target = metadata["class_name"]
+
+        if self.transforms is not None:
+            image, target = self.transforms(image, target)
+
+        return image, target
+    
+    def decode_png(self, png_data):
+        """ Correctly Load .png image from WebDataset"""
+        with io.BytesIO(png_data) as f:
+            img = Image.open(f)
+
+            # Convert single-channel grayscale to 3-channel
+            if img.mode == "L":  # "L" mode means grayscale (single channel)
+                img = np.array(img)  # Convert to NumPy
+                img = np.stack([img] * 3, axis=-1)  # Stack into 3-channel
+                img = Image.fromarray(img)  # Convert back to PIL Image
+            
+            return img
