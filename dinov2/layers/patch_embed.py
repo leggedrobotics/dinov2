@@ -8,12 +8,15 @@
 #   https://github.com/rwightman/pytorch-image-models/tree/master/timm/layers/patch_embed.py
 
 from typing import Callable, Optional, Tuple, Union
-
+from omegaconf import ListConfig
 from torch import Tensor
 import torch.nn as nn
 
 
 def make_2tuple(x):
+    if isinstance(x, ListConfig):
+        return (x[0], x[1])
+
     if isinstance(x, tuple):
         assert len(x) == 2
         return x

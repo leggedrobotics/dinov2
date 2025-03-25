@@ -13,7 +13,7 @@ from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
 
 from dinov2.data import SamplerType, make_data_loader, make_dataset
-from dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator, DataAugmentationDINODepth
+from dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator, DataAugmentationDINODepth, DataAugmentationDINODepthRange
 import dinov2.distributed as distributed
 from dinov2.fsdp import FSDPCheckpointer
 from dinov2.logging import MetricLogger
@@ -23,6 +23,7 @@ from dinov2.utils.utils import CosineScheduler
 from dinov2.train.ssl_meta_arch import SSLMetaArch
 import wandb
 from omegaconf import OmegaConf
+from omegaconf import ListConfig
 
 import torch.multiprocessing as mp
 mp.set_start_method('spawn', force=True)
@@ -181,12 +182,23 @@ def do_train(cfg, model, resume=False):
 
     # setup data preprocessing
 
+    # img_size = cfg.crops.global_crops_size
+    # patch_size = cfg.student.patch_size
+    # n_tokens = (img_size // patch_size) ** 2
+    # mask_generator = MaskingGenerator(
+    #     input_size=(img_size // patch_size, img_size // patch_size),
+    #     max_num_patches=0.5 * img_size // patch_size * img_size // patch_size,
+    # )
+
     img_size = cfg.crops.global_crops_size
+    if not isinstance(img_size, ListConfig):
+        img_size = (img_size,) * 2
+
     patch_size = cfg.student.patch_size
-    n_tokens = (img_size // patch_size) ** 2
+    n_tokens = (img_size[0] // patch_size) * (img_size[1] // patch_size)
     mask_generator = MaskingGenerator(
-        input_size=(img_size // patch_size, img_size // patch_size),
-        max_num_patches=0.5 * img_size // patch_size * img_size // patch_size,
+        input_size=(img_size[0] // patch_size, img_size[1] // patch_size),
+        max_num_patches=0.5 * img_size[0] // patch_size * img_size[1] // patch_size,
     )
 
     # data_transform = DataAugmentationDINO(
@@ -196,15 +208,18 @@ def do_train(cfg, model, resume=False):
     #     global_crops_size=cfg.crops.global_crops_size,
     #     local_crops_size=cfg.crops.local_crops_size,
     # )
-    data_transform = DataAugmentationDINODepth(
+    # data_transform = DataAugmentationDINODepth(
+    #     cfg.crops.global_crops_scale,
+    #     cfg.crops.local_crops_scale,
+    #     cfg.crops.local_crops_number,
+    #     global_crops_size=cfg.crops.global_crops_size,
+    #     local_crops_size=cfg.crops.local_crops_size,
+    # )
+    data_transform = DataAugmentationDINODepthRange(
         cfg.crops.global_crops_scale,
         cfg.crops.local_crops_scale,
         cfg.crops.local_crops_number,
-        global_crops_size=cfg.crops.global_crops_size,
-        local_crops_size=cfg.crops.local_crops_size,
     )
-
-
 
     collate_fn = partial(
         collate_data_and_cast,

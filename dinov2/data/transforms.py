@@ -50,6 +50,12 @@ class MaybeToTensor(transforms.ToTensor):
 IMAGENET_DEFAULT_MEAN = (0.5, 0.5, 0.5)
 IMAGENET_DEFAULT_STD = (0.2, 0.2, 0.2)
 
+NUSCENES_DEFAULT_MEAN = (12.12, 10.88, 0.23, -1.04, 0.21)
+NUSCENES_DEFAULT_STD = (12.32, 11.47, 6.91, 0.86, 0.16)
+
+# NUSCENES_DEFAULT_MEAN = (0, 0, 0, 0, 0)
+# NUSCENES_DEFAULT_STD = (1, 1, 1, 1, 1)
+
 # Depth Image-net mean and std (for min-max normalization) Computed Value
 # IMAGENET_DEFAULT_MEAN = (0.393, 0.393, 0.393)
 # IMAGENET_DEFAULT_STD = (0.295, 0.295, 0.295) 
@@ -57,6 +63,12 @@ IMAGENET_DEFAULT_STD = (0.2, 0.2, 0.2)
 def make_normalize_transform(
     mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
     std: Sequence[float] = IMAGENET_DEFAULT_STD,
+) -> transforms.Normalize:
+    return transforms.Normalize(mean=mean, std=std)
+
+def make_normalize_transform_nuscenes(
+    mean: Sequence[float] = NUSCENES_DEFAULT_MEAN,
+    std: Sequence[float] = NUSCENES_DEFAULT_STD,
 ) -> transforms.Normalize:
     return transforms.Normalize(mean=mean, std=std)
 
