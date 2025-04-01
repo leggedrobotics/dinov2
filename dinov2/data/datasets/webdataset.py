@@ -17,7 +17,7 @@ class WebDatasetVision(VisionDataset):
         target_transform: Optional[Callable] = None,
         images_per_shard=1000,
         shard_pattern: str = "*.tar",  # Pattern for WebDataset shards
-        shuffle_buffer: int = 10000,  # Number of samples for shuffle
+        shuffle_buffer: int = 1000,  # Number of samples for shuffle
     ):
         super().__init__(root, transforms, transform, target_transform)
         self.root = root
@@ -138,7 +138,7 @@ class WebDatasetVisionPNG(WebDatasetVision):
         target_transform: Optional[Callable] = None,
         images_per_shard=3200,
         shard_pattern: str = "*.tar",  # Pattern for WebDataset shards
-        shuffle_buffer: int = 10000,  # Number of samples for shuffle
+        shuffle_buffer: int = 1000,  # Number of samples for shuffle
     ):
         super().__init__(
             root, transforms, transform, target_transform, images_per_shard, shard_pattern, shuffle_buffer
@@ -149,7 +149,7 @@ class WebDatasetVisionPNG(WebDatasetVision):
             wds.WebDataset(self.shard_files, resampled=True, nodesplitter=wds.split_by_node, shardshuffle=True)
             .shuffle(shuffle_buffer)
             .to_tuple("png", "json")  # Expect .png images & .json metadata
-            .map(self.process_sample)
+            .map(self.process_sample, handler=wds.handlers.ignore_and_continue)
         )
 
     def process_sample(self, sample):
@@ -169,38 +169,36 @@ class WebDatasetVisionPNG(WebDatasetVision):
         return image, target
     
     def decode_png(self, png_data):
-        """ Correctly Load .png image from WebDataset"""
-        with io.BytesIO(png_data) as f:
-            img = Image.open(f)
-            img_np = np.array(img)
+        """ Robustly load .png image from WebDataset """
+        try:
+            with io.BytesIO(png_data) as f:
+                img = Image.open(f)
+                img.load()  # Force load to trigger early failure
+                img_np = np.array(img)
 
-            if img_np.dtype == np.uint8:
-                # 8-bit grayscale → stack into 3-channel (These are MDE images)
-                if img.mode == "L":
-                    # Normalize and invert
-                    img_np = img_np.astype(np.float32)
+                if img_np.dtype == np.uint8:
+                    if img.mode == "L":
+                        img_np = img_np.astype(np.float32)
+                        img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
+                        img_np = 255.0 - (img_np * 255.0)
+                        img_np = img_np.astype(np.uint8)
+                        img_np = np.stack([img_np] * 3, axis=-1)
+                        return Image.fromarray(img_np)
+                    else:
+                        raise ValueError(f"Unsupported 8-bit image mode: {img.mode}")
+                elif img_np.dtype == np.uint16:
+                    img_np[np.isnan(img_np)] = 0
+                    img_np = img_np.astype(np.float32) / 512.0
                     img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
-                    img_np = 255.0 - (img_np * 255.0)
-                    img_np = img_np.astype(np.uint8)
-
+                    img_np = (img_np * 255).astype(np.uint8)
                     img_np = np.stack([img_np] * 3, axis=-1)
                     return Image.fromarray(img_np)
                 else:
-                    raise ValueError(f"Unsupported 8-bit image mode: {img.mode}")
-            elif img_np.dtype == np.uint16:
-                # These are depth images -> COnvert to metric and set the nans to zero
-                img_np = (img_np.astype(np.float32) / 65535.0) * 512.0
-                img_np[np.isnan(img_np)] = 0
-                # clip the value at 20 meters
-                img_np = np.clip(img_np, 0, 20)
-                # For now lets just min-max normalize the image
-                img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min())
-                img_np = (img_np * 255).astype(np.uint8)
-                img_np = np.stack([img_np] * 3, axis=-1)
-                return Image.fromarray(img_np)
-                
-            else:
-                raise ValueError(f"Unsupported PNG dtype: {img_np.dtype}")
+                    raise ValueError(f"Unsupported PNG dtype: {img_np.dtype}")
+        except Exception as e:
+            print(f"⚠️ PNG decode failed: {e} — Using blank image.")
+            # Return a blank (black) 3-channel image (e.g., 224x224)
+            return Image.fromarray(np.ones((224, 224, 3), dtype=np.uint8))
             
 
 class WebDatasetVisionRange(WebDatasetVision):
@@ -212,7 +210,7 @@ class WebDatasetVisionRange(WebDatasetVision):
         target_transform: Optional[Callable] = None,
         images_per_shard=3300,
         shard_pattern: str = "*.tar",
-        shuffle_buffer: int = 10000,
+        shuffle_buffer: int = 1000,
     ):
         super().__init__(
             root,
