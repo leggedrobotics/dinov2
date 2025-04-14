@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from torchvision.datasets.vision import VisionDataset
 import glob
 from scipy.interpolate import griddata
+import os
 
 class WebDatasetVision(VisionDataset):
     def __init__(
@@ -21,8 +22,18 @@ class WebDatasetVision(VisionDataset):
     ):
         super().__init__(root, transforms, transform, target_transform)
         self.root = root
+ 
+        # self.shard_files = glob.glob(f"{root}/{shard_pattern}")
+        # Check if there are any subfolders
+        contains_subfolders = any(os.path.isdir(os.path.join(root, entry)) for entry in os.listdir(root))
 
-        self.shard_files = glob.glob(f"{root}/{shard_pattern}")
+        if contains_subfolders:
+            # Search recursively for shard files in all subfolders
+            self.shard_files = glob.glob(os.path.join(root, "**", shard_pattern), recursive=True)
+        else:
+            # Look only in the current directory
+            self.shard_files = glob.glob(os.path.join(root, shard_pattern))
+
         self.num_shards = len(self.shard_files)
         self.estimated_num_samples = self.num_shards * images_per_shard  # Approximate dataset size
 
@@ -156,19 +167,28 @@ class WebDatasetVisionPNG(WebDatasetVision):
         """Process a single sample (depth image & metadata)."""
         png_data, json_data = sample
         
-        image = self.decode_png(png_data)
         metadata = self.safe_json_decode(json_data)
         try:
             target = metadata["class_name"]
         except:
             target = "dummy_text"
 
+        # Check if depth _resolution or depth_multiplier is in metadata
+        depth_multiplier = metadata.get("depth_multiplier", 1.0)
+        depth_resolution = metadata.get("depth_resolution", 1.0) # This was saved for omnidata 
+        
+        if depth_resolution != 1.0:
+            # If depth_resolution is not 1.0, use it to scale the image
+            depth_multiplier = depth_resolution
+
+        image = self.decode_png(png_data, depth_multiplier=depth_multiplier)
+
         if self.transforms is not None:
             image, target = self.transforms(image, target)
 
         return image, target
     
-    def decode_png(self, png_data):
+    def decode_png(self, png_data, depth_multiplier=1.0, clip_depth=20):
         """ Robustly load .png image from WebDataset """
         try:
             with io.BytesIO(png_data) as f:
@@ -188,7 +208,9 @@ class WebDatasetVisionPNG(WebDatasetVision):
                         raise ValueError(f"Unsupported 8-bit image mode: {img.mode}")
                 elif img_np.dtype == np.uint16:
                     img_np[np.isnan(img_np)] = 0
-                    img_np = img_np.astype(np.float32) / 512.0
+                    img_np = img_np.astype(np.float32) / depth_multiplier
+                    img_np[np.isnan(img_np)] = 0
+                    img_np = np.clip(img_np, 0, clip_depth)
                     img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
                     img_np = (img_np * 255).astype(np.uint8)
                     img_np = np.stack([img_np] * 3, axis=-1)

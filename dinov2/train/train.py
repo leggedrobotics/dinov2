@@ -208,18 +208,18 @@ def do_train(cfg, model, resume=False):
     #     global_crops_size=cfg.crops.global_crops_size,
     #     local_crops_size=cfg.crops.local_crops_size,
     # )
-    # data_transform = DataAugmentationDINODepth(
-    #     cfg.crops.global_crops_scale,
-    #     cfg.crops.local_crops_scale,
-    #     cfg.crops.local_crops_number,
-    #     global_crops_size=cfg.crops.global_crops_size,
-    #     local_crops_size=cfg.crops.local_crops_size,
-    # )
-    data_transform = DataAugmentationDINODepthRange(
+    data_transform = DataAugmentationDINODepth(
         cfg.crops.global_crops_scale,
         cfg.crops.local_crops_scale,
         cfg.crops.local_crops_number,
+        global_crops_size=cfg.crops.global_crops_size,
+        local_crops_size=cfg.crops.local_crops_size,
     )
+    # data_transform = DataAugmentationDINODepthRange(
+    #     cfg.crops.global_crops_scale,
+    #     cfg.crops.local_crops_scale,
+    #     cfg.crops.local_crops_number,
+    # )
 
     collate_fn = partial(
         collate_data_and_cast,
