@@ -197,7 +197,26 @@ class ImageNetDepth(ExtendedVisionDataset):
         class_names = self._get_class_names()
         return str(class_names[class_index])
 
+    # def get_image_data(self, index: int) -> bytes:
+    #     entries = self._get_entries()
+    #     actual_index = entries[index]["actual_index"]
+
+    #     class_id = self.get_class_id(index)
+
+    #     image_relpath = self.split.get_image_relpath(actual_index, class_id)
+    #     image_full_path = os.path.join(self.root, image_relpath)
+
+    #     depth_array = np.load(image_full_path)['depth']
+
+    #     depth_normalized = ((depth_array - np.min(depth_array)) / (np.max(depth_array) - np.min(depth_array)) * 255).astype(np.uint8)
+    #     depth_img = np.stack([depth_normalized]*3, axis=-1)
+    #     return Image.fromarray(depth_img)
+
+    #     # depth_tensor = torch.tensor(depth_img, dtype=torch.float32)
+    #     # return depth_tensor
+
     def get_image_data(self, index: int) -> bytes:
+
         entries = self._get_entries()
         actual_index = entries[index]["actual_index"]
 
@@ -206,14 +225,13 @@ class ImageNetDepth(ExtendedVisionDataset):
         image_relpath = self.split.get_image_relpath(actual_index, class_id)
         image_full_path = os.path.join(self.root, image_relpath)
 
-        depth_array = np.load(image_full_path)['depth']
-
-        depth_normalized = ((depth_array - np.min(depth_array)) / (np.max(depth_array) - np.min(depth_array)) * 255).astype(np.uint8)
-        depth_img = np.stack([depth_normalized]*3, axis=-1)
-        return Image.fromarray(depth_img)
-
-        # depth_tensor = torch.tensor(depth_img, dtype=torch.float32)
-        # return depth_tensor
+        img_np = np.load(image_full_path)['depth']
+        img_np = img_np.astype(np.float32)
+        img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
+        img_np = 255.0 - (img_np * 255.0)
+        img_np = img_np.astype(np.uint8)
+        img_np = np.stack([img_np] * 3, axis=-1)
+        return Image.fromarray(img_np)
 
     def get_target(self, index: int) -> Optional[Target]:
         entries = self._get_entries()
