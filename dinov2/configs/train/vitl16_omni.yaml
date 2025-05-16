@@ -1,0 +1,6 @@
+train:
+  batch_size_per_gpu: 64
+  dataset_path: WebDatasetPNG
+  num_workers: 32
+student:
+  block_chunks: 4

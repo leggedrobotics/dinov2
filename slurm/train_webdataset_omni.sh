@@ -1,8 +1,8 @@
 #!/bin/bash -l
 
-#SBATCH --job-name=dinov2_imagenet22k
-#SBATCH --time=23:59:00
-#SBATCH --nodes=24
+#SBATCH --job-name=dinov2_omni
+#SBATCH --time=8:00:00
+#SBATCH --nodes=8
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=70
 #SBATCH --account=a-a144
@@ -31,11 +31,11 @@ cd /users/patelm/ws/rsl/dinov2
 echo "Starting training"
 
 echo $pwd
-experiment=vitl14_depth_aug_96GPU_imagenet22k
+experiment=vits16_depth_32GPU_BS64_data_a_webd
 
 # Run the training script inside the container
 srun python -m dinov2.train.train \
   --exp-name ${experiment} \
-  --config-file dinov2/configs/train/vitl14.yaml \
+  --config-file dinov2/configs/train/vits16_omni.yaml \
   --output-dir /capstor/store/cscs/swissai/a03/patelm/output_result/${experiment} \
-  train.dataset_path=WebDatasetVisionPNG:root=/iopsstor/scratch/cscs/patelm/datasets_gfm/imagenet-22k
+  train.dataset_path=WebDatasetVisionPNG:root=/iopsstor/scratch/cscs/patelm/datasets_gfm/
