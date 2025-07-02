@@ -191,21 +191,34 @@ class DinoVisionTransformer(nn.Module):
         patch_pos_embed = pos_embed[:, 1:]         # (1, N, dim)
         dim = x.shape[-1]
 
+        kwargs = {}
+
+
         # Compute pretrained patch grid size
         orig_h, orig_w = img_size[0] // self.patch_size, img_size[1] // self.patch_size
-        new_h, new_w = h // self.patch_size, w // self.patch_size
+        h0, w0 = h // self.patch_size, w // self.patch_size
 
         assert orig_h * orig_w == patch_pos_embed.shape[1], \
             f"Original patch shape mismatch: got {patch_pos_embed.shape[1]}, expected {orig_h * orig_w}"
+
+        if self.interpolate_offset:
+                # Historical kludge: add a small number to avoid floating point error in the interpolation, see https://github.com/facebookresearch/dino/issues/8
+            # Note: still needed for backward-compatibility, the underlying operators are using both output size and scale factors
+            sx = float(w0 + self.interpolate_offset) / orig_w
+            sy = float(h0 + self.interpolate_offset) / orig_h
+            kwargs["scale_factor"] = (sx, sy)
+        else:
+            # Simply specify an output size instead of a scale factor
+            kwargs["size"] = (w0, h0)
 
         # Reshape and interpolate
         patch_pos_embed = patch_pos_embed.reshape(1, orig_h, orig_w, dim).permute(0, 3, 1, 2)  # (1, dim, H, W)
         patch_pos_embed = torch.nn.functional.interpolate(
             patch_pos_embed,
-            size=(new_h, new_w),
             mode="bicubic",
             align_corners=False,
             antialias=self.interpolate_antialias,
+            **kwargs,
         )
 
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).reshape(1, -1, dim)  # (1, new_h*new_w, dim)
