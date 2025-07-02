@@ -8,6 +8,7 @@ train:
   batch_size_per_gpu: 32
   dataset_path: ImageNet22k
   centering: sinkhorn_knopp
+  num_workers: 32
 student:
   arch: vit_large
   patch_size: 14

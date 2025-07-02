@@ -71,7 +71,6 @@ class MetricLogger(object):
         end = time.time()
         iter_time = SmoothedValue(fmt="{avg:.6f}")
         data_time = SmoothedValue(fmt="{avg:.6f}")
-
         if n_iterations is None:
             n_iterations = len(iterable)
 
@@ -84,6 +83,7 @@ class MetricLogger(object):
             "{meters}",
             "time: {time}",
             "data: {data}",
+            "tokens_per_gpu_per_sec: {tokens_per_gpu_per_sec}",
         ]
         if torch.cuda.is_available():
             log_list += ["max mem: {memory:.0f}"]
@@ -94,6 +94,8 @@ class MetricLogger(object):
             data_time.update(time.time() - end)
             yield obj
             iter_time.update(time.time() - end)
+            tokens_per_gpu_per_sec = self.meters["n_tokens_total_per_img"].avg * self.meters["current_batch_size"].avg / iter_time.avg
+            self.update(tokens_per_gpu_per_sec=tokens_per_gpu_per_sec)
             if i % print_freq == 0 or i == n_iterations - 1:
                 self.dump_in_output_file(iteration=i, iter_time=iter_time.avg, data_time=data_time.avg)
                 eta_seconds = iter_time.global_avg * (n_iterations - i)
@@ -107,6 +109,7 @@ class MetricLogger(object):
                             meters=str(self),
                             time=str(iter_time),
                             data=str(data_time),
+                            tokens_per_gpu_per_sec=str(tokens_per_gpu_per_sec),
                             memory=torch.cuda.max_memory_allocated() / MB,
                         )
                     )
@@ -119,6 +122,7 @@ class MetricLogger(object):
                             meters=str(self),
                             time=str(iter_time),
                             data=str(data_time),
+                            tokens_per_gpu_per_sec=str(tokens_per_gpu_per_sec),
                         )
                     )
             i += 1

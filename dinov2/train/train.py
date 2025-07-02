@@ -200,6 +200,15 @@ def do_train(cfg, model, resume=False):
         input_size=(img_size[0] // patch_size, img_size[1] // patch_size),
         max_num_patches=0.5 * img_size[0] // patch_size * img_size[1] // patch_size,
     )
+    
+    n_tokens_teacher = 2 * (n_tokens + 1)
+
+    lc_img_size = cfg.crops.local_crops_size
+    if not isinstance(lc_img_size, ListConfig):
+        lc_img_size = (lc_img_size,) * 2
+
+    n_tokens_student = cfg.crops.local_crops_number * ((lc_img_size[0] // patch_size) * (lc_img_size[1] // patch_size) + 1)
+    n_tokens_total_per_img = n_tokens_teacher + n_tokens_student
 
     # data_transform = DataAugmentationDINO(
     #     cfg.crops.global_crops_scale,
@@ -328,8 +337,13 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(last_layer_lr=last_layer_lr)
         metric_logger.update(current_batch_size=current_batch_size)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
+        metric_logger.update(n_tokens_total_per_img=n_tokens_total_per_img)
 
         if distributed.is_main_process():
+            wandb_metrics = {
+                f"metrics/{k}": v.global_avg  # or v.avg if you prefer moving avg
+                for k, v in metric_logger.meters.items()
+            }
             wandb.log({
                 "lr": lr,
                 "weight_decay": wd,
@@ -337,6 +351,7 @@ def do_train(cfg, model, resume=False):
                 "last_layer_lr": last_layer_lr,
                 "batch_size": current_batch_size,
                 "total_loss": losses_reduced,
+                **wandb_metrics,
                 **{f"loss/{k}": v for k, v in loss_dict_reduced.items()}
             }, step=iteration)
 
