@@ -86,6 +86,9 @@ student:
   interpolate_antialias: false
   interpolate_offset: 0.1
 teacher:
+  arch: vit_large  # Architecture of the teacher model for distillation # If distillation is set to false, this will be ignored as same architecture as student will be used
+  ckpt_path: /path/to/teacher_checkpoint.pth  # Path to the teacher checkpoint for distillation
+  ckpt_config: /path/to/teacher_config.yaml  # Path to the teacher config file  
   momentum_teacher: 0.992
   final_momentum_teacher: 1
   warmup_teacher_temp: 0.04
