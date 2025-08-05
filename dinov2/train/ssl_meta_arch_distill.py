@@ -55,7 +55,8 @@ class SSLMetaArchDistillation(nn.Module):
         student_backbone, student_ema_backbone, embed_dim = build_model_from_cfg(cfg)
             
         student_model_dict["backbone"] = student_backbone
-        teacher_model_dict["backbone"] = student_ema_backbone
+        student_ema_model_dict["backbone"] = student_ema_backbone
+        teacher_model_dict["backbone"] = teacher_backbone
         logger.info(f"OPTIONS -- architecture : embed_dim: {embed_dim}")
 
         if cfg.student.pretrained_weights:
@@ -93,12 +94,21 @@ class SSLMetaArchDistillation(nn.Module):
                 logger.info("OPTIONS -- DINO -- applying KOLEO regularization")
                 self.koleo_loss = KoLeoLoss()
 
+            dino_head_teacher = partial(
+                DINOHead,
+                in_dim=teacher_embed_dim,
+                out_dim=teacher_cfg.dino.head_n_prototypes,
+                hidden_dim=teacher_cfg.dino.head_hidden_dim,
+                bottleneck_dim=teacher_cfg.dino.head_bottleneck_dim,
+                nlayers=teacher_cfg.dino.head_nlayers,
+            )
+
         else:
             logger.info("OPTIONS -- DINO -- not using DINO")
 
         if self.do_dino or self.do_ibot:
             student_model_dict["dino_head"] = dino_head()
-            teacher_model_dict["dino_head"] = dino_head()
+            teacher_model_dict["dino_head"] = dino_head_teacher()
             student_ema_model_dict["dino_head"] = dino_head()
 
         logger.info("OPTIONS -- IBOT")
@@ -124,8 +134,16 @@ class SSLMetaArchDistillation(nn.Module):
                     bottleneck_dim=teacher_cfg.ibot.head_bottleneck_dim,
                     nlayers=teacher_cfg.ibot.head_nlayers,
                 )
+                ibot_head_teacher = partial(
+                    DINOHead,
+                    in_dim=teacher_embed_dim,
+                    out_dim=teacher_cfg.ibot.head_n_prototypes,
+                    hidden_dim=teacher_cfg.ibot.head_hidden_dim,
+                    bottleneck_dim=teacher_cfg.ibot.head_bottleneck_dim,
+                    nlayers=teacher_cfg.ibot.head_nlayers,
+                )
                 student_model_dict["ibot_head"] = ibot_head()
-                teacher_model_dict["ibot_head"] = ibot_head()
+                teacher_model_dict["ibot_head"] = ibot_head_teacher()
                 student_ema_model_dict["ibot_head"] = ibot_head()
             else:
                 logger.info("OPTIONS -- IBOT -- head shared with DINO")
@@ -150,9 +168,10 @@ class SSLMetaArchDistillation(nn.Module):
             k.replace("dino_head.", ""): v for k, v in state_dict.items() if k.startswith("dino_head.")
         }, strict=True)
 
-        self.teacher["ibot_head"].load_state_dict({
-            k.replace("ibot_head.", ""): v for k, v in state_dict.items() if k.startswith("ibot_head.")
-        }, strict=True)
+        if self.do_ibot and self.ibot_separate_head:
+            self.teacher["ibot_head"].load_state_dict({
+                k.replace("ibot_head.", ""): v for k, v in state_dict.items() if k.startswith("ibot_head.")
+            }, strict=True)
 
         self.teacher.eval()
         # there is no backpropagation through the teacher, so no need for gradients
@@ -269,7 +288,7 @@ class SSLMetaArchDistillation(nn.Module):
 
         teacher_dino_softmaxed_centered_list, masked_teacher_ibot_softmaxed_centered = get_teacher_output()
         reshard_fsdp_model(self.teacher)
-        reshard_fsdp_model(self.student_ema)
+        # reshard_fsdp_model(self.student_ema)
 
         loss_dict = {}
 
