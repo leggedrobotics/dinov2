@@ -132,6 +132,9 @@ class WebDatasetVision(VisionDataset):
         return self.estimated_num_samples
 
 
+def not_none(x):
+    return x is not None
+
 class WebDatasetVisionPNG(WebDatasetVision):
     def __init__(
         self,
@@ -156,7 +159,7 @@ class WebDatasetVisionPNG(WebDatasetVision):
             .shuffle(shuffle_buffer)
             .decode()
             .map(custom_selector)
-            .select(lambda x: x is not None)
+            .select(not_none)
             .map(self.process_sample)
         )
 
@@ -257,10 +260,104 @@ class WebDatasetVisionPNG(WebDatasetVision):
             return three_channel_depth  # Return numpy array
             
         except Exception as e:
-            print(f"⚠️ PNG decode failed: {e} — Using blank 2-channel image.")
-            # Return a blank 2-channel depth image
+            print(f"⚠️ PNG decode failed: {e} — Using blank 3-channel image.")
+            # Return a blank 3-channel depth image
             return np.zeros((224, 224, 3), dtype=np.float32)
 
+
+class WebDatasetVisionPNGv1(WebDatasetVision):
+    def __init__(
+        self,
+        root: str,
+        transforms: Optional[Callable] = None,
+        transform: Optional[Callable] = None,
+        target_transform: Optional[Callable] = None,
+        images_per_shard=3200,
+        shard_pattern: str = "*.tar",  # Pattern for WebDataset shards
+        shuffle_buffer: int = 1000,  # Number of samples for shuffle
+    ):
+        super().__init__(
+            root, transforms, transform, target_transform, images_per_shard, shard_pattern, shuffle_buffer
+        )
+
+        # # Create the WebDataset pipeline
+        # self.dataset = (
+        #     wds.WebDataset(self.shard_files, resampled=True, nodesplitter=wds.split_by_node, shardshuffle=True)
+        #     .shuffle(shuffle_buffer)
+        #     .to_tuple("png", "json")  # Expect .png images & .json metadata
+        #     .map(self.process_sample, handler=wds.handlers.ignore_and_continue)
+        # )
+        self.dataset = (
+            wds.WebDataset(self.shard_files, resampled=True, 
+                            nodesplitter=wds.split_by_node, shardshuffle=True)
+            .shuffle(shuffle_buffer)
+            .decode()
+            .map(custom_selector)
+            .select(not_none)
+            .map(self.process_sample)
+        )
+
+    def process_sample(self, sample):
+        """Process a single sample (depth image & metadata)."""
+        png_data, json_data = sample
+        
+        # metadata = self.safe_json_decode(json_data)
+        metadata = json_data
+        try:
+            target = metadata["class_name"]
+        except:
+            target = "dummy_text"
+
+        # Check if depth _resolution or depth_multiplier is in metadata
+        depth_multiplier = metadata.get("depth_multiplier", 1.0)
+        depth_resolution = metadata.get("depth_resolution", 1.0) # This was saved for omnidata 
+        
+        if depth_resolution != 1.0:
+            # If depth_resolution is not 1.0, use it to scale the image
+            depth_multiplier = depth_resolution
+
+        image = self.decode_png(png_data, depth_multiplier=depth_multiplier)
+
+        if self.transforms is not None:
+            image, target = self.transforms(image, target)
+
+        return image, target
+    
+    def decode_png(self, png_data, depth_multiplier=1.0, clip_depth=20):
+        """ Robustly load .png image from WebDataset """
+        try:
+            with io.BytesIO(png_data) as f:
+                img = Image.open(f)
+                img.load()  # Force load to trigger early failure
+                img_np = np.array(img)
+
+                if img_np.dtype == np.uint8:
+                    if img.mode == "L":
+                        img_np = img_np.astype(np.float32)
+                        img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
+                        img_np = 255.0 - (img_np * 255.0)
+                        img_np = img_np.astype(np.uint8)
+                        img_np = np.stack([img_np] * 3, axis=-1)
+                        return Image.fromarray(img_np)
+                    else:
+                        raise ValueError(f"Unsupported 8-bit image mode: {img.mode}")
+                elif img_np.dtype == np.uint16:
+                    img_np[np.isnan(img_np)] = 0
+                    img_np = img_np.astype(np.float32) / depth_multiplier
+                    img_np[np.isnan(img_np)] = 0
+                    img_np = np.clip(img_np, 0, clip_depth)
+                    img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
+                    img_np = (img_np * 255).astype(np.uint8)
+                    img_np = np.stack([img_np] * 3, axis=-1)
+                    return Image.fromarray(img_np)
+                else:
+                    raise ValueError(f"Unsupported PNG dtype: {img_np.dtype}")
+        except Exception as e:
+            print(f"⚠️ PNG decode failed: {e} — Using blank image.")
+            # Return a blank (black) 3-channel image (e.g., 224x224)
+            return Image.fromarray(np.ones((224, 224, 3), dtype=np.uint8))
+
+        
 class WebDatasetVisionRange(WebDatasetVision):
     def __init__(
         self,

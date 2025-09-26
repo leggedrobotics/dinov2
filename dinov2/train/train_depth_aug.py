@@ -224,7 +224,7 @@ def do_train(cfg, model, resume=False):
     #     global_crops_size=cfg.crops.global_crops_size,
     #     local_crops_size=cfg.crops.local_crops_size,
     # )
-    data_transform = DataAugmentationDINODepth(
+    data_transform = DataAugmentationDINODepthNorm(
         cfg.crops.global_crops_scale,
         cfg.crops.local_crops_scale,
         cfg.crops.local_crops_number,

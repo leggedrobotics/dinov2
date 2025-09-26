@@ -13,7 +13,7 @@ from fvcore.common.checkpoint import PeriodicCheckpointer
 import torch
 
 from dinov2.data import SamplerType, make_data_loader, make_dataset
-from dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator, DataAugmentationDINODepth
+from dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator, DataAugmentationDINODepth, DataAugmentationDINODepthNorm
 import dinov2.distributed as distributed
 from dinov2.fsdp import FSDPCheckpointer
 from dinov2.logging import MetricLogger
@@ -217,7 +217,14 @@ def do_train(cfg, model, resume=False):
     #     global_crops_size=cfg.crops.global_crops_size,
     #     local_crops_size=cfg.crops.local_crops_size,
     # )
-    data_transform = DataAugmentationDINODepth(
+    # data_transform = DataAugmentationDINODepth(
+    #     cfg.crops.global_crops_scale,
+    #     cfg.crops.local_crops_scale,
+    #     cfg.crops.local_crops_number,
+    #     global_crops_size=cfg.crops.global_crops_size,
+    #     local_crops_size=cfg.crops.local_crops_size,
+    # )
+    data_transform = DataAugmentationDINODepthNorm(
         cfg.crops.global_crops_scale,
         cfg.crops.local_crops_scale,
         cfg.crops.local_crops_number,

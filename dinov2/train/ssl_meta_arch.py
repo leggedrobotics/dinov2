@@ -18,6 +18,7 @@ from dinov2.utils.param_groups import get_params_groups_with_decay, fuse_params_
 from dinov2.fsdp import get_fsdp_wrapper, ShardedGradScaler, get_fsdp_modules, reshard_fsdp_model
 
 from dinov2.models.vision_transformer import BlockChunk
+import dinov2.utils.utils as dinov2_utils
 
 try:
     from xformers.ops import fmha
@@ -72,12 +73,16 @@ class SSLMetaArch(nn.Module):
 
         # This is commented out, because it was easier to create the model using the torch.hub, as this already returns the pretrained version with the correct architecture.
         if self.cfg.train.finetune:
-            _, _, embed_dim = build_model_from_cfg(cfg)
+            student_backbone, teacher_backbone, embed_dim = build_model_from_cfg(cfg)
+            dinov2_utils.load_pretrained_weights(student_backbone, cfg.teacher.ckpt_path, "teacher")
+            dinov2_utils.load_pretrained_weights(teacher_backbone, cfg.teacher.ckpt_path, "teacher")
 
-            logger.info(f"Using Pretrained weights from torchHub : embed_dim: {embed_dim}")
-            # use for interpolated loading downloaded weights
-            student_backbone = get_downloaded_dino_interpolated()
-            teacher_backbone = get_downloaded_dino_interpolated()
+            # _, _, embed_dim = build_model_from_cfg(cfg)
+
+            # logger.info(f"Using Pretrained weights from torchHub : embed_dim: {embed_dim}")
+            # # use for interpolated loading downloaded weights
+            # student_backbone = get_downloaded_dino_interpolated()
+            # teacher_backbone = get_downloaded_dino_interpolated()
         else:
             student_backbone, teacher_backbone, embed_dim = build_model_from_cfg(cfg)
             

@@ -47,8 +47,12 @@ class MaybeToTensor(transforms.ToTensor):
 # IMAGENET_DEFAULT_STD = (0.2761, 0.2345, 0.1412)
 
 # Depth Image-net mean and std (for min-max normalization) Standard Value
-IMAGENET_DEFAULT_MEAN = (0.5, 0.5, 0.5)
-IMAGENET_DEFAULT_STD = (0.2, 0.2, 0.2)
+IMAGENET_DEFAULT_MEAN = (0.3347, 0.5781, 0.4711) # For dataset All
+IMAGENET_DEFAULT_STD = (0.2514, 0.3264, 0.3328) # For dataset All
+# IMAGENET_DEFAULT_MEAN = (0.5, 0.5, 0.5)
+# IMAGENET_DEFAULT_STD = (0.2, 0.2, 0.2)
+# IMAGENET_DEFAULT_MEAN =(0.248880, 0.495620, 0.492858) # For dataset B
+# IMAGENET_DEFAULT_STD = (0.139357, 0.271314, 0.297177) # For dataset B
 
 NUSCENES_DEFAULT_MEAN = (12.12, 10.88, 0.23, -1.04, 0.21)
 NUSCENES_DEFAULT_STD = (12.32, 11.47, 6.91, 0.86, 0.16)
