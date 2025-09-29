@@ -5,8 +5,8 @@
 
 from .adapters import DatasetWithEnumeratedTargets
 from .loaders import make_data_loader, make_dataset, SamplerType
-from .collate import collate_data_and_cast
+from .collate import collate_data_and_cast, collate_data_and_cast_conv
 from .masking import MaskingGenerator
 from .augmentations import DataAugmentationDINO
-from .augmentations_depth import DataAugmentationDINODepth, DataAugmentationDINODepthNorm
+from .augmentations_depth import DataAugmentationDINODepth, DataAugmentationDINODepthNorm, DataAugmentationDINODepthNormConv
 from .augmentations_range import DataAugmentationDINODepthRange

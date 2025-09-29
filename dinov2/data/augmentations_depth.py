@@ -265,6 +265,144 @@ class DataAugmentationDINODepthNorm(object):
 
         return output
 
+class DataAugmentationDINODepthNormConv(object):
+    def __init__(
+        self,
+        global_crops_scale,
+        local_crops_scale, 
+        local_crops_number,
+        global_crops_size=224,
+        local_crops_size=96,
+    ):
+
+        self.global_crops_scale = global_crops_scale
+        self.local_crops_scale = local_crops_scale
+        self.local_crops_number = local_crops_number
+        self.global_crops_size = global_crops_size 
+        self.local_crops_size = local_crops_size
+
+        # Hardcoded sizes for High Resolution Fine Tuning
+        # self.global_crops_size = 518
+        # self.local_crops_size = 224
+
+        logger.info("###################################")
+        logger.info("Using DEPTH data augmentation parameters:")
+        logger.info(f"global_crops_scale: {global_crops_scale}")
+        logger.info(f"local_crops_scale: {local_crops_scale}")
+        logger.info(f"local_crops_number: {local_crops_number}")
+        logger.info(f"global_crops_size: {global_crops_size}")
+        logger.info(f"local_crops_size: {local_crops_size}")
+        logger.info("###################################")
+
+        # Get the global crop size for convnet
+        global_crop_size_conv = (global_crops_size // 14 ) * 16
+
+        # random resized crop and flip
+        self.geometric_augmentation_global = transforms.Compose(
+            [   
+                transforms.ToTensor(),
+                transforms.RandomResizedCrop(
+                    global_crop_size_conv, scale=global_crops_scale, interpolation=transforms.InterpolationMode.BILINEAR
+                ),
+                transforms.RandomHorizontalFlip(p=0.5),
+            ]
+        )
+
+        self.geometric_augmentation_local = transforms.Compose(
+            [   
+                transforms.ToTensor(),
+                transforms.RandomResizedCrop(
+                    local_crops_size, scale=local_crops_scale, interpolation=transforms.InterpolationMode.BILINEAR
+                ),
+                transforms.RandomHorizontalFlip(p=0.5),   
+            ]
+        )
+
+        self.geometric_resize_global = transforms.Compose(
+            [
+                transforms.Resize(global_crops_size, interpolation=transforms.InterpolationMode.BILINEAR)
+            ]
+        )
+
+        # Depth-specific photometric augmentations (NO ColorJitter, Grayscale, Solarize)
+        depth_photometric = DepthPhotometricJitter(
+            p=0.8, 
+            brightness=0.20,  # More conservative than RGB
+            contrast=0.20,    # More conservative than RGB
+            per_channel=True
+        )
+
+        # Depth-aware blur and noise
+        global_extra1 = transforms.Compose([
+            DepthAwareGaussianBlur(p=1.0, radius_max=2.0),  # Less blur than RGB
+            DepthNoise(p=0.3, noise_std=0.03),           # Slightly more noise than RGB
+            RandomPixelDropout(p=0.3, drop_prob_range=(0.0, 0.1)),  # Up to 10% pixels dropped
+            # DepthChannelDropout(p=0.1),
+        ])
+
+        global_extra2 = transforms.Compose([
+            DepthAwareGaussianBlur(p=0.1, radius_max=1.5),
+            DepthNoise(p=0.2, noise_std=0.02),
+        ])
+
+        local_extra = transforms.Compose([
+            DepthAwareGaussianBlur(p=0.5, radius_max=1.5),
+            DepthNoise(p=0.25, noise_std=0.018),
+            RandomPixelDropout(p=0.2, drop_prob_range=(0.0, 0.05)),  # Up to 10% pixels dropped
+        ])
+
+        self.normalize = transforms.Compose(
+            [
+                make_normalize_transform(),
+            ]
+        )
+
+        # Complete transformation pipelines
+        self.global_transfo1 = transforms.Compose([
+            depth_photometric, 
+            global_extra1, 
+            self.normalize
+        ])
+        
+        self.global_transfo2 = transforms.Compose([
+            depth_photometric, 
+            global_extra2, 
+            self.normalize
+        ])
+        
+        self.local_transfo = transforms.Compose([
+            depth_photometric, 
+            local_extra, 
+            self.normalize
+        ])
+
+    def __call__(self, image):
+        output = {}
+
+        # global crops:
+        im1_base = self.geometric_augmentation_global(image)
+        global_crop_1 = self.global_transfo1(im1_base)
+
+        im2_base = self.geometric_augmentation_global(image)
+        global_crop_2 = self.global_transfo2(im2_base)
+
+        global_crop_teacher_1 = self.geometric_resize_global(global_crop_1)
+        global_crop_teacher_2 = self.geometric_resize_global(global_crop_2)
+
+        output["global_crops"] = [global_crop_1, global_crop_2]
+
+        # global crops for teacher:
+        output["global_crops_teacher"] = [global_crop_teacher_1, global_crop_teacher_2]
+
+        # local crops:
+        local_crops = [
+            self.local_transfo(self.geometric_augmentation_local(image)) for _ in range(self.local_crops_number)
+        ]
+        output["local_crops"] = local_crops
+        output["offsets"] = ()
+
+        return output
+
 class DataAugmentationDINODepth(object):
     def __init__(
         self,
