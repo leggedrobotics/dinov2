@@ -1,0 +1,40 @@
+dino:
+  head_n_prototypes: 131072
+  head_bottleneck_dim: 384
+  koleo_loss_weight: 0.0
+ibot:
+  separate_head: true
+  head_n_prototypes: 131072
+train:
+  batch_size_per_gpu: 32
+  dataset_path: ImageNet22k
+  centering: sinkhorn_knopp
+  num_workers: 32
+student:
+  arch: vit_small
+  patch_size: 14
+  drop_path_rate: 0.3
+  ffn_layer: swiglufused
+  block_chunks: 4
+  multi_config: 
+    - name: "resnet18"
+      out_channels: 128
+      head_hidden_dim: 2048
+      head_bottleneck_dim: 384
+      head_nlayers: 3
+    
+teacher:
+  momentum_teacher: 0.994
+  arch: vit_large  # Architecture of the teacher model for distillation # If distillation is set to false, this will be ignored as same architecture as student will be used
+  ckpt_path: /capstor/store/cscs/swissai/a144/patelm/output_result/vitl14_data_all_96GPU_3_channel_625k_webd/eval/training_624999/teacher_checkpoint.pth # Path to the teacher checkpoint for distillation
+  ckpt_config: /capstor/store/cscs/swissai/a144/patelm/output_result/vitl14_data_all_96GPU_3_channel_625k_webd/config # Path to the teacher config file
+optim:
+  epochs: 500
+  weight_decay: 0.04
+  weight_decay_end: 0.4
+  base_lr: 7.0e-4  # learning rate for a batch size of 1024
+  warmup_epochs: 80
+  layerwise_decay: 0.9
+crops:
+  local_crops_size: 64
+  global_crops_size: 112

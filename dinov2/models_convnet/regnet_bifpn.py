@@ -1,3 +1,4 @@
+from functools import partial
 import torch
 import torch.nn as nn
 from collections import OrderedDict
@@ -7,9 +8,32 @@ from torchvision.models.feature_extraction import create_feature_extractor
 
 from .bifpn import BiFPN
 
+def replace_bn_with_gn(model, default_num_groups=32):
+    """
+    Recursively replaces all BatchNorm layers in a model with GroupNorm.
+    Automatically adjusts num_groups so that num_channels % num_groups == 0.
+    """
+    for name, module in model.named_children():
+        if isinstance(module, (nn.BatchNorm2d, nn.SyncBatchNorm)):
+            num_channels = module.num_features
+
+            # Choose a valid num_groups dynamically
+            num_groups = default_num_groups
+            while num_groups > 1 and num_channels % num_groups != 0:
+                num_groups //= 2
+            if num_channels % num_groups != 0:
+                num_groups = 1  # fallback to LayerNorm-like behavior
+
+            gn = nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)
+            setattr(model, name, gn)
+
+        else:
+            replace_bn_with_gn(module, default_num_groups=default_num_groups)
+
+    return model
 
 class RegNetBiFPN(nn.Module):
-    def __init__(self, backbone_name="regnet_y_400mf", out_channels=128, n_blocks=1, pretrained=True):
+    def __init__(self, backbone_name="regnet_y_400mf", out_channels=128, n_blocks=1, pretrained=True, gn_groups=32):
         super().__init__()
 
         # pick backbone
@@ -27,6 +51,7 @@ class RegNetBiFPN(nn.Module):
         }[backbone_name]
 
         backbone = backbone_fn(weights="IMAGENET1K_V1" if pretrained else None)
+        backbone = replace_bn_with_gn(backbone, default_num_groups=gn_groups)
 
         # extract last 3 stages (C3=/8, C4=/16, C5=/32)
         return_nodes = {
@@ -36,21 +61,30 @@ class RegNetBiFPN(nn.Module):
         }
         self.backbone = create_feature_extractor(backbone, return_nodes=return_nodes)
 
-        # infer channels from backbone
+        # pooling
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+
+        # infer channels
         dummy = torch.zeros(1, 3, 224, 224)
         with torch.no_grad():
             feats = self.backbone(dummy)
+            cls = self.global_pool(feats["c5"]).flatten(1)
+            embed_dim = cls.shape[1]
         in_channels_list = [f.shape[1] for f in feats.values()]
         print(f"Backbone {backbone_name} feature channels: {in_channels_list}")
 
         # BiFPN
         self.fpn = BiFPN(in_channels_list, out_channels, n_blocks=n_blocks)
 
-        # pooling layers
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        # final norm
+        norm_layer = partial(nn.LayerNorm, eps=1e-6)
 
 
-    def forward(self, x):
+        self.norm_cls = norm_layer(embed_dim)
+        self.norm_patch = norm_layer(out_channels)
+
+
+    def forward(self, x, norm=True):
         # backbone outputs: raw C3, C4, C5
         feats = self.backbone(x)
         feats = OrderedDict([(k, v) for k, v in feats.items()])
@@ -60,6 +94,15 @@ class RegNetBiFPN(nn.Module):
 
         # BiFPN fusion → P3, P4, P5
         feats_bifpn = self.fpn(feats)
+
+        if norm:
+            global_feat_backbone = self.norm_cls(global_feat_backbone)
+            for k in feats_bifpn.keys():
+                # B, C, H, W -> B, H, W, C
+                feats_bifpn[k] = feats_bifpn[k].permute(0, 2, 3, 1)
+                feats_bifpn[k] = self.norm_patch(feats_bifpn[k])
+                # B, H, W, C -> B, C, H, W
+                feats_bifpn[k] = feats_bifpn[k].permute(0, 3, 1, 2)
 
         # dense features from BiFPN
         dense_feats_bifpn = {

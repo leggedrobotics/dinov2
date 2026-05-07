@@ -61,6 +61,7 @@ ibot:
 train:
   batch_size_per_gpu: 64
   dataset_path: ImageNet:split=TRAIN
+  dataset_list_file: null
   finetune: false
   output_dir: .
   saveckp_freq: 20
@@ -70,6 +71,7 @@ train:
   cache_dataset: true
   centering: "centering" # or "sinkhorn_knopp"
 student:
+  multi_config: None
   arch: vit_large
   patch_size: 16
   in_chans: 3

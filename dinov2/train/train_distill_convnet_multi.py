@@ -20,7 +20,7 @@ from dinov2.logging import MetricLogger
 from dinov2.utils.config import setup
 from dinov2.utils.utils import CosineScheduler
 
-from dinov2.train.ssl_meta_arch_distill_convnet import SSLMetaArchDistillation
+from dinov2.train.ssl_meta_arch_distill_convnet_multi import SSLMetaArchDistillation
 import wandb
 from omegaconf import OmegaConf
 from omegaconf import ListConfig
@@ -136,15 +136,52 @@ def initialize_wandb(cfg):
     )
 
 def do_test(cfg, model, iteration):
-    new_state_dict = model.student_ema.state_dict()
 
+    # --- IMPORTANT: state_dict() MUST be collected on ALL ranks ---
+    # We'll build a temporary dict of student_name → state_dict
+    ema_states = {}
+
+    for student_name, module_dict in model.student_ema.items():
+        ema_states[student_name] = module_dict.state_dict()
+
+    # --- Now ONLY rank 0 performs saving ---
     if distributed.is_main_process():
         iterstring = str(iteration)
         eval_dir = os.path.join(cfg.train.output_dir, "eval", iterstring)
         os.makedirs(eval_dir, exist_ok=True)
-        # save teacher checkpoint
-        teacher_ckp_path = os.path.join(eval_dir, "student_ema_checkpoint.pth")
-        torch.save({"teacher": new_state_dict}, teacher_ckp_path)
+
+        for student_name, raw_state in ema_states.items():
+
+            # Remove possible student_name prefix
+            clean_state = {
+                k.replace(f"{student_name}.", ""): v
+                for k, v in raw_state.items()
+            }
+
+            save_path = os.path.join(eval_dir, f"{student_name}_ema_checkpoint.pth")
+            torch.save({"teacher": clean_state}, save_path)
+            print(f"Saved EMA model → {save_path}")
+
+# def do_test(cfg, model, iteration):
+
+#     if distributed.is_main_process():
+#         iterstring = str(iteration)
+#         eval_dir = os.path.join(cfg.train.output_dir, "eval", iterstring)
+#         os.makedirs(eval_dir, exist_ok=True)
+
+#         # Loop over each student and save ONLY the backbone part of EMA
+#         for student_name, module_dict in model.student_ema.items():
+#             raw_state = module_dict.state_dict()
+
+#             # Remove "student_name." prefixes so checkpoint is standalone
+#             clean_state = {
+#                 k.replace(f"{student_name}.", ""): v
+#                 for k, v in raw_state.items()
+#             }
+
+#             save_path = os.path.join(eval_dir, f"{student_name}_ema_checkpoint.pth")
+#             torch.save({"teacher": clean_state}, save_path)
+#             print(f"Saved EMA model → {save_path}")
 
 
 def do_train(cfg, model, resume=False):
@@ -251,8 +288,7 @@ def do_train(cfg, model, resume=False):
     dataset = make_dataset(
         dataset_str=cfg.train.dataset_path,
         transform=data_transform,
-        target_transform=None,
-        dataset_list_file=cfg.train.get("dataset_list_file", None),
+        target_transform=None,  
     )
 
     # sampler_type = SamplerType.INFINITE
@@ -303,20 +339,37 @@ def do_train(cfg, model, resume=False):
         optimizer.zero_grad(set_to_none=True)
         loss_dict = model.forward_backward(data, teacher_temp=teacher_temp)
 
-        # clip gradients
-
+        # Clip gradients and step optimizer
         if fp16_scaler is not None:
             if cfg.optim.clip_grad:
                 fp16_scaler.unscale_(optimizer)
-                for v in model.student.values():
-                    v.clip_grad_norm_(cfg.optim.clip_grad)
+                # Clip gradients for each student submodule individually
+                for student_name in model.student.keys():
+                    for v in model.student[student_name].values():
+                        v.clip_grad_norm_(cfg.optim.clip_grad)
             fp16_scaler.step(optimizer)
             fp16_scaler.update()
         else:
             if cfg.optim.clip_grad:
-                for v in model.student.values():
-                    v.clip_grad_norm_(cfg.optim.clip_grad)
+                for student_name in model.student.keys():
+                    for v in model.student[student_name].values():
+                        v.clip_grad_norm_(cfg.optim.clip_grad)
             optimizer.step()
+
+        # # clip gradients
+
+        # if fp16_scaler is not None:
+        #     if cfg.optim.clip_grad:
+        #         fp16_scaler.unscale_(optimizer)
+        #         for v in model.student.values():
+        #             v.clip_grad_norm_(cfg.optim.clip_grad)
+        #     fp16_scaler.step(optimizer)
+        #     fp16_scaler.update()
+        # else:
+        #     if cfg.optim.clip_grad:
+        #         for v in model.student.values():
+        #             v.clip_grad_norm_(cfg.optim.clip_grad)
+        #     optimizer.step()
 
         # perform teacher EMA update
 

@@ -20,7 +20,6 @@ def replace_bn_with_gn(model: nn.Module, num_groups: int = 32):
             replace_bn_with_gn(module, num_groups=num_groups)
     return model
 
-
 class ResNetBiFPN(nn.Module):
     def __init__(self, backbone_name="resnet18", out_channels=128, n_blocks=1, pretrained=True, gn_groups=32):
 

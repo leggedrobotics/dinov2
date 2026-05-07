@@ -6,7 +6,6 @@
 from functools import partial
 import logging
 import os
-from shutil import copy
 
 import torch
 from torch import nn
@@ -30,6 +29,7 @@ except ImportError:
 logger = logging.getLogger("dinov2")
 
 import math
+import copy
 import torch.nn.functional as nnf
 
 from dinov2.models_convnet import build_student_backbone
@@ -49,33 +49,43 @@ class SSLMetaArchDistillation(nn.Module):
         student_model_dict = dict()
         student_ema_model_dict = dict()
         teacher_model_dict = dict()
+        student_embed_dim = dict()
 
         teacher_cfg = load_and_merge_config(cfg.teacher.ckpt_config)
         teacher_backbone, teacher_embed_dim = build_model_from_cfg(teacher_cfg, only_teacher=True)
 
-        # Initialize the student and EMA student model (Only Pick the first since this is not multi-distillation)
-        student_cfg = cfg.student.multi_config[0]
-        student_backbone_name = student_cfg.name
-        student_embed_dim_spatial = student_cfg.out_channels
-        student_head_hidden_dim = student_cfg.head_hidden_dim
-        student_head_bottleneck_dim = student_cfg.head_bottleneck_dim
-        student_head_nlayers = student_cfg.head_nlayers
+        # Get the multi student configs
+        if cfg.student.multi_config is not None:
+            for multi_cfg in cfg.student.multi_config:
 
+                if multi_cfg.name not in student_model_dict:
+                    student_model_dict[multi_cfg.name] = {}
+                if multi_cfg.name not in student_ema_model_dict:
+                    student_ema_model_dict[multi_cfg.name] = {}
+
+                multi_student_backbone, embed_dim = build_student_backbone(
+                    backbone_name=multi_cfg.name,
+                    out_channels=multi_cfg.out_channels,
+                )
+                student_model_dict[f"{multi_cfg.name}"]["backbone"] = multi_student_backbone
+                student_ema_model_dict[multi_cfg.name]["backbone"] = copy.deepcopy(multi_student_backbone)
+
+                student_embed_dim[f"{multi_cfg.name}"] = embed_dim
+                logger.info(f"OPTIONS -- Multi student backbone: {multi_cfg.name} with out_channels: {multi_cfg.out_channels}")
+
+        # student_embed_dim_spatial = 256
         # Initialize the student and EMA student models
-        student_backbone, embed_dim = build_student_backbone(backbone_name=student_backbone_name, out_channels=student_embed_dim_spatial)
-        student_ema_backbone, _ = build_student_backbone(backbone_name=student_backbone_name, out_channels=student_embed_dim_spatial)
+        # student_backbone, embed_dim = build_student_backbone(backbone_name="resnet50", out_channels=student_embed_dim_spatial)
+        # student_ema_backbone, _ = build_student_backbone(backbone_name="resnet50", out_channels=student_embed_dim_spatial)
+
+        
             
-        student_model_dict["backbone"] = student_backbone
-        student_ema_model_dict["backbone"] = student_ema_backbone
+        # student_model_dict["backbone"] = student_backbone
+        # student_ema_model_dict["backbone"] = student_ema_backbone
         teacher_model_dict["backbone"] = teacher_backbone
         logger.info(f"OPTIONS -- architecture : embed_dim: {embed_dim}")
 
-        if cfg.student.pretrained_weights:
-            chkpt = torch.load(cfg.student.pretrained_weights)
-            logger.info(f"OPTIONS -- pretrained weights: loading from {cfg.student.pretrained_weights}")
-            student_backbone.load_state_dict(chkpt["model"], strict=False)
-
-        self.embed_dim = embed_dim
+        self.student_embed_dim = student_embed_dim
 
         # Use the teacher configs to avoid any mismatch for the head dims
         self.dino_out_dim = teacher_cfg.dino.head_n_prototypes
@@ -92,14 +102,21 @@ class SSLMetaArchDistillation(nn.Module):
             logger.info(f"OPTIONS -- DINO -- head_bottleneck_dim: {cfg.dino.head_bottleneck_dim}")
             logger.info(f"OPTIONS -- DINO -- head_hidden_dim: {cfg.dino.head_hidden_dim}")
             self.dino_loss_weight = teacher_cfg.dino.loss_weight
-            dino_head = partial(
-                DINOHead,
-                in_dim=embed_dim,
-                out_dim=teacher_cfg.dino.head_n_prototypes,
-                hidden_dim=student_head_hidden_dim,
-                bottleneck_dim=student_head_bottleneck_dim,
-                nlayers=student_head_nlayers,
-            )
+
+            for multi_cfg in cfg.student.multi_config:
+                embed_dim = self.student_embed_dim[multi_cfg.name]
+                dino_head = partial(
+                    DINOHead,
+                    in_dim=embed_dim,
+                    out_dim=teacher_cfg.dino.head_n_prototypes,
+                    hidden_dim=multi_cfg.head_hidden_dim,
+                    bottleneck_dim=multi_cfg.head_bottleneck_dim,
+                    nlayers=teacher_cfg.dino.head_nlayers,
+                )
+                student_model_dict[f"{multi_cfg.name}"]["dino_head"] = dino_head()
+                student_ema_model_dict[f"{multi_cfg.name}"]["dino_head"] = dino_head()
+
+
             self.dino_loss = DINOLoss(self.dino_out_dim)
             if self.do_koleo:
                 logger.info("OPTIONS -- DINO -- applying KOLEO regularization")
@@ -118,9 +135,9 @@ class SSLMetaArchDistillation(nn.Module):
             logger.info("OPTIONS -- DINO -- not using DINO")
 
         if self.do_dino or self.do_ibot:
-            student_model_dict["dino_head"] = dino_head()
+            # student_model_dict["dino_head"] = dino_head()
             teacher_model_dict["dino_head"] = dino_head_teacher()
-            student_ema_model_dict["dino_head"] = dino_head()
+            # student_ema_model_dict["dino_head"] = dino_head()
 
         logger.info("OPTIONS -- IBOT")
         logger.info(f"OPTIONS -- IBOT -- loss_weight: {teacher_cfg.ibot.loss_weight}")
@@ -137,14 +154,21 @@ class SSLMetaArchDistillation(nn.Module):
                 logger.info(f"OPTIONS -- IBOT -- head_n_prototypes: {teacher_cfg.ibot.head_n_prototypes}")
                 logger.info(f"OPTIONS -- IBOT -- head_bottleneck_dim: {teacher_cfg.ibot.head_bottleneck_dim}")
                 logger.info(f"OPTIONS -- IBOT -- head_hidden_dim: {teacher_cfg.ibot.head_hidden_dim}")
-                ibot_head = partial(
-                    DINOHead,
-                    in_dim=student_embed_dim_spatial,
-                    out_dim=teacher_cfg.ibot.head_n_prototypes,
-                    hidden_dim=student_head_hidden_dim,
-                    bottleneck_dim=student_head_bottleneck_dim,
-                    nlayers=student_head_nlayers,
-                )
+
+                for multi_cfg in cfg.student.multi_config:
+                    student_embed_dim_spatial = multi_cfg.out_channels
+                    ibot_head = partial(
+                        DINOHead,
+                        in_dim=student_embed_dim_spatial,
+                        out_dim=teacher_cfg.ibot.head_n_prototypes,
+                        hidden_dim=multi_cfg.head_hidden_dim,
+                        bottleneck_dim=multi_cfg.head_bottleneck_dim,
+                        nlayers=teacher_cfg.ibot.head_nlayers,
+                    )
+                    student_model_dict[f"{multi_cfg.name}"]["ibot_head"] = ibot_head()
+                    student_ema_model_dict[f"{multi_cfg.name}"]["ibot_head"] = ibot_head()
+                    logger.info(f"OPTIONS -- Multi student ibot head: {multi_cfg.name} with out_channels: {multi_cfg.out_channels}")
+
                 ibot_head_teacher = partial(
                     DINOHead,
                     in_dim=teacher_embed_dim,
@@ -153,17 +177,25 @@ class SSLMetaArchDistillation(nn.Module):
                     bottleneck_dim=teacher_cfg.ibot.head_bottleneck_dim,
                     nlayers=teacher_cfg.ibot.head_nlayers,
                 )
-                student_model_dict["ibot_head"] = ibot_head()
+                # student_model_dict["ibot_head"] = ibot_head()
                 teacher_model_dict["ibot_head"] = ibot_head_teacher()
-                student_ema_model_dict["ibot_head"] = ibot_head()
+                # student_ema_model_dict["ibot_head"] = ibot_head()
             else:
                 logger.info("OPTIONS -- IBOT -- head shared with DINO")
 
         self.need_to_synchronize_fsdp_streams = True
 
-        self.student = nn.ModuleDict(student_model_dict)
+        self.student = dict()
+        self.student_ema = dict()
+
+        for k in student_model_dict.keys():
+            self.student[k] = nn.ModuleDict(student_model_dict[k])
+            self.student_ema[k] = nn.ModuleDict(student_ema_model_dict[k])
+
+
+        # self.student = nn.ModuleDict(student_model_dict)
         self.teacher = nn.ModuleDict(teacher_model_dict)
-        self.student_ema = nn.ModuleDict(student_ema_model_dict)
+        # self.student_ema = nn.ModuleDict(student_ema_model_dict)
 
         # Now we need to load the teacher weights
         logger.info("OPTIONS -- loading teacher weights")
@@ -189,14 +221,22 @@ class SSLMetaArchDistillation(nn.Module):
         for p in self.teacher.parameters():
             p.requires_grad = False
 
-        for p in self.student_ema.parameters():
-            p.requires_grad = False
-        
-        # for student activate backprop
-        for p in self.student.parameters():
-            p.requires_grad = True
+        for k in self.student.keys():
+            for p in self.student[k].parameters():
+                p.requires_grad = True
 
-        logger.info(f"Student and Student EMA are built: they are both {cfg.student.arch} network.")
+        for k in self.student_ema.keys():
+            for p in self.student_ema[k].parameters():
+                p.requires_grad = False  # no backprop to ema
+
+        # for p in self.student_ema.parameters():
+        #     p.requires_grad = False
+        
+        # # for student activate backprop
+        # for p in self.student.parameters():
+        #     p.requires_grad = True
+
+        # logger.info(f"Student and Student EMA are built: they are both {cfg.student.arch} network.")
         logger.info(f"Teacher is built: it is a {cfg.teacher.arch} network.")
 
     def forward(self, inputs):
@@ -308,125 +348,127 @@ class SSLMetaArchDistillation(nn.Module):
 
         loss_accumulator = 0  # for backprop
 
-        student_global_backbone_output_dict = self.student.backbone(global_crops, norm=True)
-        student_local_backbone_output_dict = self.student.backbone(local_crops, norm=True)
+        for student_name in self.student.keys():
 
-        # student_global_backbone_output_dict, student_local_backbone_output_dict = self.student.backbone(
-        #     [global_crops, local_crops], masks=[None, None], is_training=True
-        # )
-        # Get the student backbone outputs for global and local crops
-        # Stack 
+            student_global_backbone_output_dict = self.student[student_name].backbone(global_crops, norm=True)
+            student_local_backbone_output_dict = self.student[student_name].backbone(local_crops, norm=True)
+
+            # student_global_backbone_output_dict, student_local_backbone_output_dict = self.student.backbone(
+            #     [global_crops, local_crops], masks=[None, None], is_training=True
+            # )
+            # Get the student backbone outputs for global and local crops
+            # Stack 
 
 
 
-        inputs_for_student_head_list = []
+            inputs_for_student_head_list = []
 
-        # 1a: local crops cls tokens
-        student_local_cls_tokens = student_local_backbone_output_dict["global_backbone"]
-        # [BS * n_local_crops, C]
-        inputs_for_student_head_list.append(student_local_cls_tokens.unsqueeze(0))
-        
-        # 1b: global crops cls tokens
-        student_global_cls_tokens = student_global_backbone_output_dict["global_backbone"]
-        # [BS * n_global_crops, C]
-        inputs_for_student_head_list.append(student_global_cls_tokens.unsqueeze(0))
+            # 1a: local crops cls tokens
+            student_local_cls_tokens = student_local_backbone_output_dict["global_backbone"]
+            # [BS * n_local_crops, C]
+            inputs_for_student_head_list.append(student_local_cls_tokens.unsqueeze(0))
+            
+            # 1b: global crops cls tokens
+            student_global_cls_tokens = student_global_backbone_output_dict["global_backbone"]
+            # [BS * n_global_crops, C]
+            inputs_for_student_head_list.append(student_global_cls_tokens.unsqueeze(0))
 
-        ibot_student_patch_tokens = student_global_backbone_output_dict["dense_bifpn"]["P4"]
-        # [BS * n_global_crops, C, H, W] -> [BS * n_global_crops, H*W, C]
-        ibot_student_patch_tokens = ibot_student_patch_tokens.permute(0, 2, 3, 1).flatten(1, 2)
-        # [BS * n_global_crops, num_patches, C]
-        n_masked_patches = ibot_student_patch_tokens.flatten(0, 1).shape[0]
+            ibot_student_patch_tokens = student_global_backbone_output_dict["dense_bifpn"]["P4"]
+            # [BS * n_global_crops, C, H, W] -> [BS * n_global_crops, H*W, C]
+            ibot_student_patch_tokens = ibot_student_patch_tokens.permute(0, 2, 3, 1).flatten(1, 2)
+            # [BS * n_global_crops, num_patches, C]
+            n_masked_patches = ibot_student_patch_tokens.flatten(0, 1).shape[0]
 
-        # 1c: global crops patch tokens
-        if do_ibot:
-            _dim = ibot_student_patch_tokens.shape[-1]
-            buffer_tensor_patch_tokens = ibot_student_patch_tokens.new_zeros(n_masked_patches, _dim)
-            buffer_tensor_patch_tokens[:n_masked_patches].copy_(
-                ibot_student_patch_tokens.flatten(0, 1)[:n_masked_patches]
-            )
-            if not self.ibot_separate_head:
-                inputs_for_student_head_list.append(buffer_tensor_patch_tokens.unsqueeze(0))
-            else:
-                student_global_masked_patch_tokens_after_head = self.student.ibot_head(buffer_tensor_patch_tokens)[
-                    :n_masked_patches
-                ]
-
-        # 2: run
-        _attn_bias, cat_inputs = fmha.attn_bias.BlockDiagonalMask.from_tensor_list(inputs_for_student_head_list)
-        outputs_list = _attn_bias.split(self.student.dino_head(cat_inputs))
-
-        # 3a: local crops cls tokens
-        student_local_cls_tokens_after_head = outputs_list.pop(0).squeeze(0)
-        # [BS * n_local_crops, out_dim]
-
-        # 3b: global crops cls tokens
-        student_global_cls_tokens_after_head = outputs_list.pop(0).squeeze(0)
-        # [BS * n_global_crops, out_dim]
-
-        # 3c: global crops patch tokens
-        if do_ibot and not self.ibot_separate_head:
-            student_global_masked_patch_tokens_after_head = outputs_list.pop(0).squeeze(0)[:n_masked_patches]
-
-        if n_local_crops > 0:
-            dino_local_crops_loss = self.dino_loss(
-                student_output_list=student_local_cls_tokens_after_head.chunk(n_local_crops),
-                teacher_out_softmaxed_centered_list=teacher_dino_softmaxed_centered_list,
-            ) / (n_global_crops_loss_terms + n_local_crops_loss_terms)
-
-            # store for display
-            loss_dict["dino_local_crops_loss"] = dino_local_crops_loss
-
-            # accumulate loss
-            loss_accumulator += self.dino_loss_weight * dino_local_crops_loss
-
-        # process global crops
-        loss_scales = 2  # this is here since we process global crops together
-
-        if do_dino:
-            # compute loss
-            dino_global_crops_loss = (
-                self.dino_loss(
-                    student_output_list=[student_global_cls_tokens_after_head],
-                    teacher_out_softmaxed_centered_list=[
-                        teacher_dino_softmaxed_centered_list.flatten(0, 1)
-                    ],  # these were chunked and stacked in reverse so A is matched to B
+            # 1c: global crops patch tokens
+            if do_ibot:
+                _dim = ibot_student_patch_tokens.shape[-1]
+                buffer_tensor_patch_tokens = ibot_student_patch_tokens.new_zeros(n_masked_patches, _dim)
+                buffer_tensor_patch_tokens[:n_masked_patches].copy_(
+                    ibot_student_patch_tokens.flatten(0, 1)[:n_masked_patches]
                 )
-                * loss_scales
-                / (n_global_crops_loss_terms + n_local_crops_loss_terms)
-            )
+                if not self.ibot_separate_head:
+                    inputs_for_student_head_list.append(buffer_tensor_patch_tokens.unsqueeze(0))
+                else:
+                    student_global_masked_patch_tokens_after_head = self.student[student_name].ibot_head(buffer_tensor_patch_tokens)[
+                        :n_masked_patches
+                    ]
 
-            loss_dict["dino_global_crops_loss"] = dino_global_crops_loss
+            # 2: run
+            _attn_bias, cat_inputs = fmha.attn_bias.BlockDiagonalMask.from_tensor_list(inputs_for_student_head_list)
+            outputs_list = _attn_bias.split(self.student[student_name].dino_head(cat_inputs))
 
-            # accumulate loss
-            loss_accumulator += self.dino_loss_weight * dino_global_crops_loss
+            # 3a: local crops cls tokens
+            student_local_cls_tokens_after_head = outputs_list.pop(0).squeeze(0)
+            # [BS * n_local_crops, out_dim]
 
-            student_cls_tokens = student_global_cls_tokens
+            # 3b: global crops cls tokens
+            student_global_cls_tokens_after_head = outputs_list.pop(0).squeeze(0)
+            # [BS * n_global_crops, out_dim]
 
-            if self.do_koleo:
-                koleo_loss = self.cfg.dino.koleo_loss_weight * sum(
-                    self.koleo_loss(p) for p in student_cls_tokens.chunk(2)
-                )  # we don't apply koleo loss between cls tokens of a same image
-                loss_accumulator += koleo_loss
-                loss_dict["koleo_loss"] = (
-                    koleo_loss / loss_scales
-                )  # this is to display the same losses as before but we can remove eventually
+            # 3c: global crops patch tokens
+            if do_ibot and not self.ibot_separate_head:
+                student_global_masked_patch_tokens_after_head = outputs_list.pop(0).squeeze(0)[:n_masked_patches]
 
-        if do_ibot:
-            # compute loss
-            ibot_patch_loss = (
-                self.ibot_patch_loss.forward(
-                    student_global_masked_patch_tokens_after_head,
-                    masked_teacher_ibot_softmaxed_centered,
+            if n_local_crops > 0:
+                dino_local_crops_loss = self.dino_loss(
+                    student_output_list=student_local_cls_tokens_after_head.chunk(n_local_crops),
+                    teacher_out_softmaxed_centered_list=teacher_dino_softmaxed_centered_list,
+                ) / (n_global_crops_loss_terms + n_local_crops_loss_terms)
+
+                # store for display
+                loss_dict["dino_local_crops_loss"] = dino_local_crops_loss
+
+                # accumulate loss
+                loss_accumulator += self.dino_loss_weight * dino_local_crops_loss
+
+            # process global crops
+            loss_scales = 2  # this is here since we process global crops together
+
+            if do_dino:
+                # compute loss
+                dino_global_crops_loss = (
+                    self.dino_loss(
+                        student_output_list=[student_global_cls_tokens_after_head],
+                        teacher_out_softmaxed_centered_list=[
+                            teacher_dino_softmaxed_centered_list.flatten(0, 1)
+                        ],  # these were chunked and stacked in reverse so A is matched to B
+                    )
+                    * loss_scales
+                    / (n_global_crops_loss_terms + n_local_crops_loss_terms)
                 )
-                * loss_scales
-                * ibot_loss_scale
-            )
 
-            # store for display
-            loss_dict["ibot_loss"] = ibot_patch_loss / 2
+                loss_dict["dino_global_crops_loss"] = dino_global_crops_loss
 
-            # accumulate loss
-            loss_accumulator += self.ibot_loss_weight * ibot_patch_loss
+                # accumulate loss
+                loss_accumulator += self.dino_loss_weight * dino_global_crops_loss
+
+                student_cls_tokens = student_global_cls_tokens
+
+                if self.do_koleo:
+                    koleo_loss = self.cfg.dino.koleo_loss_weight * sum(
+                        self.koleo_loss(p) for p in student_cls_tokens.chunk(2)
+                    )  # we don't apply koleo loss between cls tokens of a same image
+                    loss_accumulator += koleo_loss
+                    loss_dict["koleo_loss"] = (
+                        koleo_loss / loss_scales
+                    )  # this is to display the same losses as before but we can remove eventually
+
+            if do_ibot:
+                # compute loss
+                ibot_patch_loss = (
+                    self.ibot_patch_loss.forward(
+                        student_global_masked_patch_tokens_after_head,
+                        masked_teacher_ibot_softmaxed_centered,
+                    )
+                    * loss_scales
+                    * ibot_loss_scale
+                )
+
+                # store for display
+                loss_dict["ibot_loss"] = ibot_patch_loss / 2
+
+                # accumulate loss
+                loss_accumulator += self.ibot_loss_weight * ibot_patch_loss
 
         self.backprop_loss(loss_accumulator)
 
@@ -447,26 +489,42 @@ class SSLMetaArchDistillation(nn.Module):
             torch.cuda.synchronize()
             for attr in {"_unshard_stream", "_post_backward_stream", "_pre_unshard_stream", "_all_reduce_stream", "_default_stream"}:
                 stream = getattr(self.teacher.backbone, attr)
-                setattr(self.student.dino_head, attr, stream)
                 setattr(self.teacher.dino_head, attr, stream)
-                setattr(self.student.backbone, attr, stream)
-                setattr(self.student_ema.dino_head, attr, stream)
-                setattr(self.student_ema.backbone, attr, stream)
+                for student_name in self.student.keys():
+                    setattr(self.student[student_name].dino_head, attr, stream)
+                    setattr(self.student[student_name].backbone, attr, stream)
+                    setattr(self.student_ema[student_name].dino_head, attr, stream)
+                    setattr(self.student_ema[student_name].backbone, attr, stream)
             self.need_to_synchronize_fsdp_streams = False
 
-    def update_teacher(self, m):
-        student_param_list = []
-        teacher_param_list = []
-        with torch.no_grad():
-            for k in self.student.keys():
-                for ms, mt in zip(get_fsdp_modules(self.student[k]), get_fsdp_modules(self.teacher[k])):
-                    student_param_list += ms.params
-                    teacher_param_list += mt.params
-            torch._foreach_mul_(teacher_param_list, m)
-            torch._foreach_add_(teacher_param_list, student_param_list, alpha=1 - m)
+    # def update_teacher(self, m):
+    #     student_param_list = []
+    #     teacher_param_list = []
+    #     with torch.no_grad():
+    #         for k in self.student.keys():
+    #             for ms, mt in zip(get_fsdp_modules(self.student[k]), get_fsdp_modules(self.teacher[k])):
+    #                 student_param_list += ms.params
+    #                 teacher_param_list += mt.params
+    #         torch._foreach_mul_(teacher_param_list, m)
+    #         torch._foreach_add_(teacher_param_list, student_param_list, alpha=1 - m)
 
+    
+    # def update_student_ema(self, m):
+
+    #     for student_name in self.student.keys():
+    #         student_param_list = []
+    #         student_ema_param_list = []
+    #         with torch.no_grad():
+    #             for k in self.student[student_name].keys():
+    #                 for ms, mt in zip(get_fsdp_modules(self.student[student_name][k]), get_fsdp_modules(self.student_ema[student_name][k])):
+    #                     student_param_list += ms.params
+    #                     student_ema_param_list += mt.params
+    #             torch._foreach_mul_(student_ema_param_list, m)
+    #             torch._foreach_add_(student_ema_param_list, student_param_list, alpha=1 - m)
 
     def update_student_ema(self, m):
+
+        # EMA update for the ema student
         student_param_list = []
         student_ema_param_list = []
         with torch.no_grad():
@@ -536,37 +594,98 @@ class SSLMetaArchDistillation(nn.Module):
                 })
 
         return param_groups
+    
+    def get_params_student(self):
+        """
+        Return parameter groups for ALL student subnetworks (multi-student compatible).
+        Applies same rules as before: 
+        - No weight decay for biases/norms
+        - Mark last_layer separately
+        """
 
-    def get_maybe_fused_params_for_submodel(self, m):
-        params_groups = get_params_groups_with_decay(
-            model=m,
-            lr_decay_rate=self.cfg.optim.layerwise_decay,
-            patch_embed_lr_mult=self.cfg.optim.patch_embed_lr_mult,
-        )
-        fused_params_groups = fuse_params_groups(params_groups)
-        logger.info("fusing param groups")
+        param_groups = []
 
-        for g in fused_params_groups:
-            g["foreach"] = True
-        return fused_params_groups
+        for student_name, submodules in self.student.items():
+            # 1️⃣ Backbone
+            backbone = submodules["backbone"]
+            for name, module in backbone.named_modules():
+                for n, p in module.named_parameters(recurse=False):
+                    if not p.requires_grad:
+                        continue
+                    full_name = f"{name}.{n}" if name else n
+                    param_groups.append({
+                        "params": [p],
+                        "lr_multiplier": 1.0,
+                        "wd_multiplier": 0.0 if any(k in full_name for k in ["bias", "bn", "gn", "norm"]) else 1.0,
+                        "is_last_layer": False,
+                        "name": f"{student_name}.backbone.{full_name}"
+                    })
 
-    def get_params_groups(self):
-        all_params_groups = []
-        for m in self.student.values():
-            all_params_groups += self.get_maybe_fused_params_for_submodel(m)
-        return all_params_groups
+            # 2️⃣ Heads (dino_head / ibot_head / others)
+            for head_name, module in submodules.items():
+                if head_name == "backbone":
+                    continue
+
+                last_layer_params = []
+                for n, p in module.named_parameters():
+                    if not p.requires_grad:
+                        continue
+                    if hasattr(module, "last_layer") and p is module.last_layer.weight:
+                        last_layer_params.append(p)
+                    else:
+                        param_groups.append({
+                            "params": [p],
+                            "lr_multiplier": 1.0,
+                            "wd_multiplier": 0.0 if "norm" in n or "bias" in n else 1.0,
+                            "is_last_layer": False,
+                            "name": f"{student_name}.{head_name}.{n}"
+                        })
+
+                if last_layer_params:
+                    param_groups.append({
+                        "params": last_layer_params,
+                        "lr_multiplier": 1.0,
+                        "wd_multiplier": 1.0,
+                        "is_last_layer": True,
+                        "name": f"{student_name}.{head_name}.last_layer"
+                    })
+
+        return param_groups
+
+    # def get_maybe_fused_params_for_submodel(self, m):
+    #     params_groups = get_params_groups_with_decay(
+    #         model=m,
+    #         lr_decay_rate=self.cfg.optim.layerwise_decay,
+    #         patch_embed_lr_mult=self.cfg.optim.patch_embed_lr_mult,
+    #     )
+    #     fused_params_groups = fuse_params_groups(params_groups)
+    #     logger.info("fusing param groups")
+
+    #     for g in fused_params_groups:
+    #         g["foreach"] = True
+    #     return fused_params_groups
+
+    # def get_params_groups(self):
+    #     all_params_groups = []
+    #     for m in self.student.values():
+    #         all_params_groups += self.get_maybe_fused_params_for_submodel(m)
+    #     return all_params_groups
 
     def prepare_for_distributed_training(self):
         logger.info("DISTRIBUTED FSDP -- preparing model for distributed training")
-        if has_batchnorms(self.student):
-            raise NotImplementedError
+        for k in self.student.keys():
+            # Sanity check: no batchnorms
+            if has_batchnorms(self.student[k]):
+                raise NotImplementedError
+        
+        for student_name in self.student.keys():
+            for k, v in self.student[student_name].items():
+                self.student_ema[student_name][k].load_state_dict(self.student[student_name][k].state_dict())  # Sync EMA at start
+                student_model_cfg = self.cfg.compute_precision.student[k]
+                self.student[student_name][k] = get_fsdp_wrapper(student_model_cfg, modules_to_wrap={BlockChunk})(self.student[student_name][k])
+                self.student_ema[student_name][k] = get_fsdp_wrapper(student_model_cfg, modules_to_wrap={BlockChunk})(self.student_ema[student_name][k])
+
         # Synchronize all student subnetworks across GPUs
-        for k, v in self.student.items():
-            # self.teacher[k].load_state_dict(self.student[k].state_dict())
-            self.student_ema[k].load_state_dict(self.student[k].state_dict())  # Sync EMA at start
-            student_model_cfg = self.cfg.compute_precision.student[k]
-            self.student[k] = get_fsdp_wrapper(student_model_cfg, modules_to_wrap={BlockChunk})(self.student[k])
+        for k, v in self.student[student_name].items():
             teacher_model_cfg = self.cfg.compute_precision.teacher[k]
             self.teacher[k] = get_fsdp_wrapper(teacher_model_cfg, modules_to_wrap={BlockChunk})(self.teacher[k])
-            # Wrap EMA with same config as student
-            self.student_ema[k] = get_fsdp_wrapper(student_model_cfg, modules_to_wrap={BlockChunk})(self.student_ema[k])
